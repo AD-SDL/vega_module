@@ -4,7 +4,7 @@ RPL="rpl"
 
 CMD1="echo '$RPL' | sudo -S chmod 666 /dev/ttyUSB0"
 CMD2="source ~/venvs/dexmate/bin/activate"
-CMD3="source ~/humanoids/vega_module/lab_connect.sh"
+CMD3="source ~/humanoids/vega_module/scripts/lab_connect.sh"
 CMD4="cd ~/humanoids/omniteleop/"
 
 LAUNCH_CMDS=(
