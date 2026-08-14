@@ -1,192 +1,173 @@
 #!/usr/bin/env bash
-
-# set -euo pipefail
+#
+# Launch (or stop) the exoskeleton teleop stack.
+#
+#   ./launch_exo_teleop.sh          # launch each component in its own window
+#   ./launch_exo_teleop.sh stop     # kill all teleop processes and sensors
+#
+# Optional env vars (or set them in ../.env):
+#   EXO_DEV_PORT              serial port for the exo   (default /dev/ttyUSB0)
+#   VENV_PATH                 python venv to activate   (default ~/venvs/dexmate)
+#   LAUNCH_SENSORS            true to launch sensors    (default true)
+#   LAUNCH_TELEMETRY_VIEWER   true to open the viewer   (default false)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MODULE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)" # adjust ".." to match actual script depth
+MODULE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# ssh options for the Nano hop (via the Jetson): a first-time or stale host-key
+# entry makes ssh refuse password auth, so skip known_hosts entirely.
+NANO_SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
+# --- Load environment from ../.env (does not override already-set vars) ---------
+# Loaded before the `stop` command so it has the robot/Nano credentials needed
+# to reach and kill the remote sensors.
 ENV_FILE="$MODULE_ROOT/.env"
 if [[ -f "$ENV_FILE" ]]; then
     echo "-> Loading environment from $ENV_FILE"
-    while IFS='=' read -r key value; do
+    # `|| [[ -n "$key" ]]` processes a final line that has no trailing newline
+    # (otherwise the last var in .env is silently dropped).
+    while IFS='=' read -r key value || [[ -n "$key" ]]; do
         [[ -z "$key" || "$key" == \#* ]] && continue
-        if [[ -z "${!key+x}" ]]; then
-            export "$key=$value"
-        fi
+        [[ -z "${!key+x}" ]] && export "$key=$value"
     done < "$ENV_FILE"
 fi
 
-# find_repo_root() {
-#     local dir="$1"
-#     while [[ "$dir" != "/" ]]; do
-#         if [[ -d "$dir/.git" || -f "$dir/pyproject.toml" || -f "$dir/setup.py" ]]; then
-#             echo "$dir"
-#             return 0
-#         fi
-#         dir="$(dirname "$dir")"
-#     done
-#     return 1
-# }
+# The teleop processes this script launches (matched by their .py filenames);
+# used for both the `stop` command and the pre-launch stale cleanup.
+STALE_PATTERN="joycon_reader\.py|arm_reader\.py|command_processor\.py|robot_controller\.py|mcap_recorder\.py|telemetry_viewer\.py"
 
-# PKG_FILE="$(python -c "import omniteleop, os; print(os.path.abspath(omniteleop.__file__))" 2>/dev/null)" || {
-#     echo "Error: could not import 'omniteleop'. Is it installed in the active environment (pip install -e .)?" >&2
-#     exit 1
-# }
+stop_teleop() {
+    local pids
+    pids=$(pgrep -f "$STALE_PATTERN" || true)
+    if [[ -z "$pids" ]]; then
+        echo "-> No teleop processes running."
+        return
+    fi
+    echo "-> Stopping teleop processes: $pids"
+    # shellcheck disable=SC2086
+    kill -TERM $pids 2>/dev/null || true
+    for _ in $(seq 1 10); do
+        pgrep -f "$STALE_PATTERN" >/dev/null || break
+        sleep 0.5
+    done
+    pids=$(pgrep -f "$STALE_PATTERN" || true)
+    if [[ -n "$pids" ]]; then
+        echo "-> Force-killing leftovers: $pids"
+        # shellcheck disable=SC2086
+        kill -KILL $pids 2>/dev/null || true
+    fi
+}
 
-# OMNITELEOP_ROOT="$(find_repo_root "$(dirname "$PKG_FILE")")" || {
-#     echo "Error: found omniteleop at $PKG_FILE but couldn't locate a repo root (.git/pyproject.toml/setup.py) above it." >&2
-#     exit 1
-# }
+# Kill the sensors: the dexsensor binaries on the Jetson and the Nano, plus the
+# local ssh terminals that launched them. `pkill -x dexsensor` matches the binary
+# by name (not the ssh wrapper, whose command line also contains "dexsensor").
+stop_sensors() {
+    echo "-> Stopping sensors..."
+    if [[ -n "${VEGA_USER:-}" && -n "${VEGA_HOST:-}" ]]; then
+        local vega="$VEGA_USER@$VEGA_HOST"
+        ssh -o ConnectTimeout=8 "$vega" 'pkill -x dexsensor' 2>/dev/null || true
+        if [[ -n "${NANO_USER:-}" && -n "${NANO_HOST:-}" && -n "${NANO_PWD:-}" ]]; then
+            ssh -o ConnectTimeout=8 "$vega" \
+                "sshpass -p '$NANO_PWD' ssh $NANO_SSH_OPTS $NANO_USER@$NANO_HOST 'pkill -x dexsensor'" \
+                2>/dev/null || true
+        fi
+    fi
+    # Close the local sensor terminals (their command line contains "dexsensor launch").
+    pkill -f 'dexsensor launch' 2>/dev/null || true
+}
 
-# echo "-> omniteleop repo root: $OMNITELEOP_ROOT"
+if [[ "${1:-}" == "stop" ]]; then
+    stop_teleop
+    stop_sensors
+    exit 0
+fi
 
+# --- Configuration ------------------------------------------------------------
+EXO_DEV_PORT="${EXO_DEV_PORT:-/dev/ttyUSB0}"
+VENV_PATH="${VENV_PATH:-$HOME/venvs/dexmate}"
+LAUNCH_SENSORS="${LAUNCH_SENSORS:-true}"
+LAUNCH_TELEMETRY_VIEWER="${LAUNCH_TELEMETRY_VIEWER:-false}"
+
+# --- Resolve the omniteleop repo root -----------------------------------------
 find_repo_root() {
     local dir="$1"
     while [[ "$dir" != "/" ]]; do
         if [[ -d "$dir/.git" || -f "$dir/pyproject.toml" || -f "$dir/setup.py" ]]; then
-            echo "$dir"
-            return 0
+            echo "$dir"; return 0
         fi
         dir="$(dirname "$dir")"
     done
     return 1
 }
 
-PYTHON_BIN="${PYTHON_BIN:-python}"
+# Prefer the installed omniteleop location (editable install in the venv), since
+# that is the code the components actually run. Fall back to probing on disk.
+OMNITELEOP_ROOT=""
+PKG_DIR="$("$VENV_PATH/bin/python" -c "import omniteleop, os; print(os.path.realpath(os.path.dirname(omniteleop.__file__)))" 2>/dev/null || true)"
+[[ -n "$PKG_DIR" ]] && OMNITELEOP_ROOT="$(find_repo_root "$PKG_DIR" || true)"
 
-echo "-> Checking omniteleop import with: $PYTHON_BIN"
-set +e
-"$PYTHON_BIN" - <<'PYDEBUG' 2>&1
-import os, sys, traceback
-print(f"python_executable={sys.executable}")
-print(f"cwd={os.getcwd()}")
-print("sys.path:")
-for p in sys.path:
-    print(f"  {p}")
-try:
-    import omniteleop
-    print(f"omniteleop_file={os.path.abspath(omniteleop.__file__)}")
-except Exception as e:
-    print(f"IMPORT_ERROR={type(e).__name__}: {e}")
-    traceback.print_exc()
-PYDEBUG
-set -e
-
-PKG_FILE="$("$PYTHON_BIN" -c "import omniteleop, os; print(os.path.abspath(omniteleop.__file__))" 2>/dev/null || true)"
-if [[ -n "$PKG_FILE" ]]; then
-    OMNITELEOP_ROOT="$(find_repo_root "$(dirname "$PKG_FILE")" || true)"
-else
+if [[ -z "$OMNITELEOP_ROOT" || ! -d "$OMNITELEOP_ROOT/src/omniteleop" ]]; then
     OMNITELEOP_ROOT=""
-fi
-
-if [[ -z "$OMNITELEOP_ROOT" ]]; then
-    echo "-> omniteleop import failed; probing likely repo locations..." >&2
-    for candidate in "$MODULE_ROOT" "$MODULE_ROOT/.." "$HOME/humanoids" /home/rpl/humanoids "$HOME"; do
-        if [[ -d "$candidate" ]]; then
-            found="$(find_repo_root "$candidate" || true)"
-            if [[ -n "$found" ]]; then
-                echo "-> candidate repo root: $found"
-                OMNITELEOP_ROOT="$found"
-                break
-            fi
-        fi
+    for candidate in /home/rpl/humanoids/omniteleop "$MODULE_ROOT/../omniteleop"; do
+        [[ -d "$candidate/src/omniteleop" ]] && { OMNITELEOP_ROOT="$(cd "$candidate" && pwd)"; break; }
     done
 fi
 
 if [[ -z "$OMNITELEOP_ROOT" ]]; then
-    OMNITELEOP_ROOT="$(cd "$MODULE_ROOT/.." && pwd)"
-    echo "-> WARNING: omniteleop repo root could not be resolved automatically; using fallback: $OMNITELEOP_ROOT" >&2
+    echo "-> ERROR: could not locate the omniteleop repo (no src/omniteleop found)." >&2
+    exit 1
 fi
-
 echo "-> omniteleop repo root: $OMNITELEOP_ROOT"
-
-EXO_DEV_PORT="${EXO_DEV_PORT:-/dev/ttyUSB0}"
-VENV_PATH="${VENV_PATH:-$HOME/venvs/dexmate}"
-if [[ "$VENV_PATH" == *"/bin/activate" ]]; then
-    VENV_PATH="${VENV_PATH%/bin/activate}"
-fi
-LAUNCH_SENSORS="${LAUNCH_SENSORS:-false}"
-LAUNCH_TELEMETRY_VIEWER="${LAUNCH_TELEMETRY_VIEWER:-false}"
-
-VEGA_SSH="${VEGA_USER}@${VEGA_HOST}"
-NANO_SSH="${NANO_USER}@${NANO_HOST}"
-if [[ -z "${NANO_PWD:-}" ]]; then
-    echo "-> WARNING: NANO_PWD is unset; sensor launch will be skipped unless you set it."
-fi
 
 LAB_CONNECT_SCRIPT="$SCRIPT_DIR/lab_connect.sh"
 
+# Robot namespace prefix for all Zenoh topics. dexcomm nodes prefix topics with
+# this (falling back to the ROBOT_NAME env var); the recorder subscribes under
+# it, so any remote sensor publisher must use the same value or its topics are
+# invisible. Sourced from lab_connect.sh to avoid duplicating the robot name.
+ROBOT_NAME="${ROBOT_NAME:-$(sed -n 's/^export ROBOT_NAME="\?\([^"]*\)"\?.*/\1/p' "$LAB_CONNECT_SCRIPT" | head -1)}"
+
 # Requires a passwordless sudoers rule for this exact chmod command, e.g.:
-#   sudo visudo
 #   <your_username> ALL=(ALL) NOPASSWD: /usr/bin/chmod 666 /dev/ttyUSB0
-CMD1="sudo chmod 666 $EXO_DEV_PORT"
-CMD2="source \"$VENV_PATH/bin/activate\""
-CMD3="source \"$LAB_CONNECT_SCRIPT\""
-CMD4="cd \"$OMNITELEOP_ROOT\""
+SETUP="sudo chmod 666 $EXO_DEV_PORT && source \"$VENV_PATH/bin/activate\" && source \"$LAB_CONNECT_SCRIPT\" && cd \"$OMNITELEOP_ROOT\""
 
-BASE_SENSOR_CMD="ssh -t $VEGA_SSH \"conda activate dexcontrol && dexsensor launch --sensor base_camera --sensor lidar_3d_front --sensor lidar_3d_back\""
-HEAD_SENSOR_CMD="ssh -t $VEGA_SSH \"sshpass -p '$NANO_PWD' ssh -t $NANO_SSH 'dexsensor launch --sensor head_camera'\""
-
-SENSOR_ARGS=()
-TELEOP_ARGS=()
-
-launch_teleop_tab() {
-    local title="$1"
-    local cmd="$2"
-    TELEOP_ARGS+=(--tab --title="$title" -- bash -c "$cmd")
-}
-
-launch_sensor_tab() {
-    local title="$1"
-    local cmd="$2"
-    SENSOR_ARGS+=(--tab --title="$title" -- bash -c "$cmd")
-}
-
+# --- Optionally launch sensors (Jetson + Nano) --------------------------------
 if [[ "$LAUNCH_SENSORS" == "true" ]]; then
-    launch_sensor_tab "base_sensors" "$BASE_SENSOR_CMD"
-    launch_sensor_tab "head_camera" "$HEAD_SENSOR_CMD"
+    VEGA_SSH="${VEGA_USER}@${VEGA_HOST}"
+    NANO_SSH="${NANO_USER}@${NANO_HOST}"
+    # Non-interactive ssh doesn't source ~/.bashrc, so conda must be initialized
+    # explicitly before activating the dexcontrol env on the Jetson.
+    BASE_SENSOR_CMD="ssh -t $VEGA_SSH \"source ~/miniconda3/etc/profile.d/conda.sh && conda activate dexcontrol && dexsensor launch --sensor base_camera --sensor lidar_3d_front --sensor lidar_3d_back\""
+    # Head camera is on the Nano, reached via the Jetson. The Nano has no
+    # ROBOT_NAME env, so dexsensor would publish under the "default" namespace and
+    # the recorder (which subscribes under $ROBOT_NAME) never sees it; --robot
+    # forces the right namespace.
+    HEAD_SENSOR_CMD="ssh -t $VEGA_SSH \"sshpass -p '$NANO_PWD' ssh -t $NANO_SSH_OPTS $NANO_SSH 'dexsensor launch --robot $ROBOT_NAME --sensor head_camera'\""
 
     echo "-> Launching sensors on the Jetson and Nano..."
-    gnome-terminal "${SENSOR_ARGS[@]}"
-    read -rp "-> Check first that sensors are running successfully, then press Enter to launch OmniTeleop..."
+    gnome-terminal --window --title="base_sensors" -- bash -c "$BASE_SENSOR_CMD; exec bash"
+    gnome-terminal --window --title="head_camera" -- bash -c "$HEAD_SENSOR_CMD; exec bash"
+    read -rp "-> Check sensors are running, then press Enter to continue..."
 fi
 
+# --- Build the teleop component list ------------------------------------------
 OMNITELEOP_CMDS=(
-    "python src/omniteleop/leader/joycon_reader.py --debug"
-    "python src/omniteleop/leader/arm_reader.py --debug"
-    "python src/omniteleop/follower/command_processor.py --debug"
-    "python src/omniteleop/follower/robot_controller.py --debug --interpolation-method linear"
-    "python src/omniteleop/record/mcap_recorder.py --debug"
+    "python src/omniteleop/leader/joycon_reader.py"
+    "python src/omniteleop/leader/arm_reader.py"
+    "python src/omniteleop/follower/command_processor.py"
+    "python src/omniteleop/follower/robot_controller.py --interpolation-method linear"
+    "python src/omniteleop/record/mcap_recorder.py"
 )
+if [[ "$LAUNCH_TELEMETRY_VIEWER" == "true" ]]; then
+    OMNITELEOP_CMDS+=("python src/omniteleop/tools/telemetry_viewer.py")
+fi
+
+# --- Clean up any stale processes, then launch --------------------------------
+# Each component opens in its own window.
+stop_teleop
+read -rp "-> Get into default position to calibrate exoskeleton, then press Enter to launch..."
 
 for cmd in "${OMNITELEOP_CMDS[@]}"; do
     title="$(basename "$(echo "$cmd" | awk '{print $2}')")"
-    launch_teleop_tab "$title" "$CMD1 && $CMD2 && $CMD3 && $CMD4 && $cmd; exec bash"
+    gnome-terminal --window --title="$title" -- bash -c "$SETUP && $cmd; exec bash"
 done
-
-if [[ "$LAUNCH_TELEMETRY_VIEWER" == "true" ]]; then
-    launch_teleop_tab "telemetry_viewer" "$CMD1 && $CMD2 && $CMD3 && $CMD4 && python src/omniteleop/tools/telemetry_viewer.py; exec bash"
-fi
-
-STALE_PATTERN="joycon_reader\.py|arm_reader\.py|robot_controller\.py|command_processor\.py|paddle_leader\.py|omniteleop\.record\.((mcap|mdp)_recorder|replay_record)"
-STALE_PIDS=$(pgrep -af "$STALE_PATTERN" | awk '{print $1}' || true)
-if [[ -n "$STALE_PIDS" ]]; then
-  echo "-> Killing stale teleop processes: $STALE_PIDS"
-  # shellcheck disable=SC2086
-  kill -TERM $STALE_PIDS 2>/dev/null || true
-  for _ in $(seq 1 10); do
-    pgrep -af "$STALE_PATTERN" >/dev/null || break
-    sleep 0.5
-  done
-  REMAINING=$(pgrep -af "$STALE_PATTERN" | awk '{print $1}' || true)
-  if [[ -n "$REMAINING" ]]; then
-    echo "-> Force-killing leftovers: $REMAINING"
-    # shellcheck disable=SC2086
-    kill -KILL $REMAINING 2>/dev/null || true
-  fi
-fi
-
-read -rp "-> Get into default position to calibrate exoskeleton, then press Enter to launch..."
-
-gnome-terminal "${TELEOP_ARGS[@]}"
-exec bash
