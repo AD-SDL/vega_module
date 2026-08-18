@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """REST node for the Dexmate Vega 1 Pro."""
 
-from dexbot_utils.configs import BaseRobotConfig  
-from madsci.node_module.helpers import action  
-from madsci.node_module.rest_node_module import RestNode  
+from dexbot_utils.configs import BaseRobotConfig
+from madsci.node_module.helpers import action
+from madsci.node_module.rest_node_module import RestNode
 
-from vega_interface.vega_interface import Vega  
-from vega_types import VegaNodeConfig  
+from vega_interface.vega_interface import Vega
+from vega_types import VegaNodeConfig
 
 
 class VegaNode(RestNode):
@@ -30,7 +30,7 @@ class VegaNode(RestNode):
     def startup_handler(self) -> None:
         """Called to (re)initialize the node. Connects to the robot."""
         if self.config.interface_type == "fake":
-            raise NotImplementedError("TBD")    # ***
+            raise NotImplementedError("TBD")  # ***
         self.vega = Vega(base_config=self.base_config)
         self.logger.log_info("Vega Node initialized.")
 
@@ -53,8 +53,7 @@ class VegaNode(RestNode):
                 self.logger.log_error(f"Error reading Vega state: {err}")
 
     def status_handler(self) -> None:
-        """Periodically called to update node status. Node stopped when either e-stopped or reading fails.
-        """
+        """Periodically called to update node status. Node stopped when either e-stopped or reading fails."""
         if self.vega is not None:
             try:
                 self.node_status.stopped = self.vega.is_estopped()
