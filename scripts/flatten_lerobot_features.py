@@ -98,11 +98,19 @@ def feature_info(keys: list[str], features: dict) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-id", required=True, help="Source dataset repo id.")
-    parser.add_argument("--root", default=None, help="Source dataset root (defaults to the lerobot cache).")
+    parser.add_argument(
+        "--root", default=None, help="Source dataset root (defaults to the lerobot cache)."
+    )
     parser.add_argument("--output-repo-id", default=None, help="Defaults to <repo-id>_flat.")
-    parser.add_argument("--output-dir", default=None, help="Defaults to $HF_LEROBOT_HOME/<output-repo-id>.")
-    parser.add_argument("--include-qvel", action="store_true", help="Append arm velocities to the state.")
-    parser.add_argument("--include-wrench", action="store_true", help="Append wrist wrenches to the state.")
+    parser.add_argument(
+        "--output-dir", default=None, help="Defaults to $HF_LEROBOT_HOME/<output-repo-id>."
+    )
+    parser.add_argument(
+        "--include-qvel", action="store_true", help="Append arm velocities to the state."
+    )
+    parser.add_argument(
+        "--include-wrench", action="store_true", help="Append wrist wrenches to the state."
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -126,11 +134,7 @@ def main() -> None:
 
     # Every split column goes away, including the state extras left out above --
     # leftovers would be picked up as additional STATE/ACTION policy features.
-    split_keys = [
-        key
-        for key in features
-        if key.startswith(("observation.state.", "action."))
-    ]
+    split_keys = [key for key in features if key.startswith(("observation.state.", "action."))]
 
     output_repo_id = args.output_repo_id or f"{args.repo_id}_flat"
     output_dir = Path(args.output_dir) if args.output_dir else None
