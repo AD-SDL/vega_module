@@ -1,0 +1,47 @@
+[project]
+name = "vega-module"
+version = "0.1.0"
+description = "Dexmate Vega 1 Pro module"
+authors = [
+    {name = "Aileen Cleary", email="acleary@anl.gov"},
+    {name = "Doga Ozgulbas", email="dozgulbas@anl.gov"}
+    ]
+readme = "README.md"
+requires-python = ">=3.10"
+
+dependencies = [
+    "madsci-node-module>=0.6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+vega-node = "vega_rest_node:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = [
+    "vega_interface",
+    "vega_fake_interface",
+    "vega_rest_node",
+    "vega_types",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
