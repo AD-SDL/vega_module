@@ -1,0 +1,4 @@
+2026-08-28T16:17:00.918339Z  WARN Unable to connect to tls/127.0.0.1:7447! Can not create a new TLS link bound to IpAddress(V4(Ipv4Addr([127, 0, 0, 1]))): invalid peer certificate: certificate expired: verification time 1787933820 (UNIX), but certificate is not valid after 1787867201 (66619 seconds ago) at index.crates.io-1949cf8c6b5b557f/zenoh-link-tls-1.9.0/src/unicast.rs:361.
+2026-08-28T16:17:00.918434Z  WARN Unable to connect to any of [tls/127.0.0.1:7447]!  at index.crates.io-1949cf8c6b5b557f/zenoh-1.9.0/src/net/runtime/orchestrator.rs:386.
+2026-08-28T16:17:00.918453Z  INFO close session zid=61880d969c01e5f2f2aabfc8427efab0
+Error: Publishing error: Failed to get DexComm session: Zenoh error: Unable to connect to any of [tls/127.0.0.1:7447]!  at index.crates.io-1949cf8c6b5b557f/zenoh-1.9.0/src/net/runtime/orchestrator.rs:386.
