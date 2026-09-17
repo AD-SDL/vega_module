@@ -68,9 +68,36 @@ def run_read(with_cameras: bool) -> None:
     print("-> Read test OK.")
 
 
+# Components with a position-mode enable/disable gate. dexcontrol brings them up disabled,
+# so a setpoint is ignored until their mode is set (normally robot_controller.py does this).
+# The head and arms use different APIs. Torso auto-idles and hands use a control-type mode
+# (mit/velocity/force), so neither has this gate -- both accept the no-op echo as-is.
+def _enable_position_components(dex_robot) -> list[str]:  # noqa: ANN001 -- dexcontrol Robot
+    """Enable position control on head + both arms. Returns the ones enabled."""
+    enabled: list[str] = []
+    dex_robot.head.set_mode("enable")
+    enabled.append("head")
+    for arm in ("left_arm", "right_arm"):
+        getattr(dex_robot, arm).set_modes(["position"] * 7)
+        enabled.append(arm)
+    print(f"-> Enabled for position control: {enabled}")
+    return enabled
+
+
+def _disable_position_component(dex_robot, comp: str) -> None:  # noqa: ANN001
+    """Return one component to its disabled state."""
+    if comp == "head":
+        dex_robot.head.set_mode("disable")
+    else:
+        getattr(dex_robot, comp).set_modes(["disable"] * 7)
+
+
 def run_command(assume_yes: bool) -> None:
     if not assume_yes:
-        print("!! This releases the software E-Stop and commands the robot. Keep the workspace clear.")
+        print(
+            "!! This releases the software E-Stop, ENABLES the head and both arms, and commands "
+            "the robot. Keep the workspace clear."
+        )
         if input("   Continue? [y/N] ").strip().lower() not in ("y", "yes"):
             print("-> Aborted.")
             return
@@ -79,6 +106,7 @@ def run_command(assume_yes: bool) -> None:
     print("-> Connecting (cameras/IMU off)...")
     robot.connect()
     estop_released = False
+    enabled_components: list[str] = []
     try:
         # The software E-Stop blocks control features, so a setpoint sent while it is
         # active is silently a no-op. Release it here so this tier actually exercises
@@ -97,6 +125,11 @@ def run_command(assume_yes: bool) -> None:
         estop_released = True
         print(f"-> Software E-Stop released: {not estop.is_software_estop_enabled()}")
 
+        # Enable the position-controlled components, or their echoed setpoint is ignored.
+        # Must follow the E-Stop release (the head refuses to enable while it is active).
+        enabled_components = _enable_position_components(robot.robot)
+        time.sleep(0.5)  # let the mode changes take effect before commanding
+
         obs = robot.get_observation()
         # Echo the current joint positions back: a no-op setpoint. max_relative_target
         # on the config still clamps each joint, so nothing can jump.
@@ -104,8 +137,13 @@ def run_command(assume_yes: bool) -> None:
         sent = robot.send_action(action)
         print(f"-> Commanded {len(sent)} joints with their current positions (no motion expected).")
     finally:
-        # Re-arm the software E-Stop before dropping the link, so we never leave the
-        # robot live after the test -- even if commanding raised above.
+        # Disable what we enabled, then re-arm the software E-Stop before dropping the link,
+        # so we never leave the robot live after the test -- even if commanding raised above.
+        for comp in enabled_components:
+            try:
+                _disable_position_component(robot.robot, comp)
+            except Exception as err:  # noqa: BLE001 -- teardown must not raise
+                print(f"-> Warning: could not disable {comp}: {err}")
         if estop_released:
             print("-> Re-activating software E-Stop...")
             robot.robot.estop.activate()

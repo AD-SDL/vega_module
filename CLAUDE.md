@@ -66,6 +66,24 @@ python scripts/check_lerobot_motion.py --via omniteleop   # robot_controller up,
 python scripts/check_lerobot_teleop.py
 ```
 
+## Recording (`scripts/launch_exo_lerobot.sh`)
+
+- Datasets land in `~/.cache/huggingface/lerobot/<repo_id>_<timestamp>` — the repo_id is
+  timestamped per run (`stamp_repo_id()`), so each run is a NEW dataset. Appending needs a
+  manual `lerobot-record --resume=true` against the full stamped repo_id (not wired here).
+- Episode control is keyboard-driven in the `lerobot-record` window: `→` end early,
+  `←` re-record last, `Esc` stop. Auto-advances after `EPISODE_TIME_S` then a
+  `RESET_TIME_S` pause. This replaces the old JoyCon-button MCAP flow.
+- Shutdown order: `Esc` the recorder and let it finish saving BEFORE stopping the
+  omniteleop stack (its `Robot.shutdown()` stops hardware `robot_controller` still drives).
+- **Recorder crashes with `DeviceNotConnectedError: VegaExoJoycon is not connected`
+  mid-episode**: `VegaExoJoycon.is_connected` is a freshness check on `robot/safe_commands`;
+  under CPU starvation a gap > `max_command_age_s` (0.5s lib default) flips it false and
+  `get_action()` raises, killing the whole session while omniteleop keeps running. Fix is
+  two levers, both now defaulted in the launch script: raise `MAX_COMMAND_AGE_S` (2.0), and
+  un-starve the loop (`STREAMING_ENCODING`, `NUM_IMAGE_WRITER_PROCS`; drop depth if still
+  slow). A ~10 Hz `Record loop is running slower` warning is the starvation tell.
+
 ## Key Classes
 
 - `VegaInterface` — Real hardware interface (`src/vega_interface.py`)

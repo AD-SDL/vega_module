@@ -143,13 +143,56 @@ class LeRobotDriver:
                 **flags,
             )
         )
+        self.component = component
         self.joints = joints
         self.clamp = clamp
         self.max_clamped = 0.0
         self.max_tracking_error = 0.0
+        self._estop_released = False
+        self._component_enabled = False
 
     def connect(self) -> None:
         self.follower.connect()
+        # The software E-Stop blocks control features, so a setpoint sent while it is active
+        # is silently a no-op -- the joint would never move and the check would fail. Release
+        # it here so this path actually commands. The physical button cannot be cleared in
+        # software; refuse rather than pretend we can.
+        estop = self.follower.robot.estop
+        if estop.is_button_pressed():
+            raise RuntimeError(
+                "Physical E-Stop button is pressed -- release it on the robot before moving."
+            )
+        if estop.is_software_estop_enabled():
+            print("-> Releasing software E-Stop...")
+            estop.deactivate()
+            time.sleep(1.0)  # let the release propagate before we command
+            if estop.is_software_estop_enabled():
+                raise RuntimeError("Software E-Stop did not release; aborting before moving.")
+        self._estop_released = True
+        print(f"-> Software E-Stop released: {not estop.is_software_estop_enabled()}")
+
+        # Even with the E-Stop released, dexcontrol components come up disabled and silently
+        # ignore setpoints until their mode is set -- normally robot_controller.py does this,
+        # but on the direct lerobot path nothing does. Enable the target component now. The
+        # head must be enabled AFTER the E-Stop is released (it refuses otherwise).
+        self._set_component_mode(enable=True)
+        time.sleep(0.5)  # let the mode change take effect before commanding
+
+    def _set_component_mode(self, enable: bool) -> None:
+        """Enable (or disable) position control on the target component.
+
+        Distinct from the E-Stop. The head and arms use different mode APIs; other
+        components (torso, hands) are left as-is, assumed already controllable here.
+        """
+        comp = getattr(self.follower.robot, self.component)
+        if self.component == "head":
+            comp.set_mode("enable" if enable else "disable")
+        elif self.component.endswith("_arm"):
+            comp.set_modes(["position" if enable else "disable"] * len(self.joints))
+        else:
+            return
+        self._component_enabled = enable
+        print(f"-> {self.component} {'enabled' if enable else 'disabled'} for position control")
 
     def send(self, targets: dict[str, float]) -> dict[str, float]:
         sent = self.follower.send_action({f"{j}.pos": v for j, v in targets.items()})
@@ -179,6 +222,18 @@ class LeRobotDriver:
         )
 
     def close(self) -> None:
+        # Re-arm the software E-Stop before dropping the link, so the robot is never left
+        # live after the check -- even if the run raised mid-motion. Disable the component
+        # we enabled first; a failure here must not block teardown.
+        if self.follower.is_connected:
+            if self._component_enabled:
+                try:
+                    self._set_component_mode(enable=False)
+                except Exception as err:  # noqa: BLE001 -- teardown must not raise
+                    print(f"-> Warning: could not disable {self.component}: {err}")
+            if self._estop_released:
+                print("-> Re-activating software E-Stop...")
+                self.follower.robot.estop.activate()
         self.follower.disconnect()
 
 
