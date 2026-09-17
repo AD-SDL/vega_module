@@ -25,6 +25,11 @@
 #   RESET_TIME_S              seconds between episodes     (default 15)
 #   FPS                       record rate                  (default 20, = command_rate)
 #   PUSH_TO_HUB               push the dataset to HF Hub   (default false)
+#   MAX_COMMAND_AGE_S         teleop staleness tolerance   (default 2.0; see note below)
+#   STREAMING_ENCODING        encode video during record   (default true)
+#   ENCODER_THREADS           threads for streaming encode (default 2)
+#   NUM_IMAGE_WRITER_PROCS    frame-writer subprocesses    (default 1)
+#   RGB_VCODEC                rgb encoder codec            (default auto)
 #   LEROBOT_VENV_PATH         venv holding BOTH lerobot and dexcontrol (default VENV_PATH)
 #   EXO_DEV_PORT              serial port for the exo      (default /dev/ttyUSB0)
 #   VENV_PATH                 python venv to activate      (default ~/venvs/dexmate)
@@ -123,6 +128,25 @@ RESET_TIME_S="${RESET_TIME_S:-15}"
 FPS="${FPS:-20}"
 # lerobot-record pushes to the HF Hub by default, which fails for a local repo_id.
 PUSH_TO_HUB="${PUSH_TO_HUB:-false}"
+
+# VegaExoJoycon.is_connected is a freshness check: it goes false when no
+# robot/safe_commands message has arrived within max_command_age_s, and
+# get_action() then RAISES, tearing down the whole recording. The 0.5s library
+# default is too tight under CPU starvation -- a single stale window kills a long
+# episode. 2.0s rides out transient hiccups while still catching a truly dead
+# command_processor within a couple of seconds.
+MAX_COMMAND_AGE_S="${MAX_COMMAND_AGE_S:-2.0}"
+
+# Encoding/writing knobs to keep the record loop near the target FPS. A starved
+# loop is what makes commands go stale (see MAX_COMMAND_AGE_S), so these two
+# problems share a fix. Streaming encoding avoids the per-episode encode stall;
+# a frame-writer subprocess keeps image writing off the loop thread. Bump one at
+# a time and watch both the loop Hz and teleop smoothness -- they compete for the
+# same cores as dexmotion/ruckig.
+STREAMING_ENCODING="${STREAMING_ENCODING:-true}"
+ENCODER_THREADS="${ENCODER_THREADS:-2}"
+NUM_IMAGE_WRITER_PROCS="${NUM_IMAGE_WRITER_PROCS:-1}"
+RGB_VCODEC="${RGB_VCODEC:-auto}"
 
 # --- Resolve the omniteleop repo root -----------------------------------------
 find_repo_root() {
@@ -235,13 +259,18 @@ LEROBOT_CMD="lerobot-record \
   --robot.max_relative_target=null \
   --teleop.type=vega_exo_joycon \
   --teleop.id=exo \
+  --teleop.max_command_age_s=$MAX_COMMAND_AGE_S \
   --dataset.repo_id=$DATASET_REPO_ID \
   --dataset.single_task=\"$DATASET_TASK\" \
   --dataset.num_episodes=$NUM_EPISODES \
   --dataset.episode_time_s=$EPISODE_TIME_S \
   --dataset.reset_time_s=$RESET_TIME_S \
   --dataset.fps=$FPS \
-  --dataset.push_to_hub=$PUSH_TO_HUB"
+  --dataset.push_to_hub=$PUSH_TO_HUB \
+  --dataset.streaming_encoding=$STREAMING_ENCODING \
+  --dataset.encoder_threads=$ENCODER_THREADS \
+  --dataset.num_image_writer_processes=$NUM_IMAGE_WRITER_PROCS \
+  --dataset.rgb_encoder.vcodec=$RGB_VCODEC"
 
 echo "-> Waiting for the teleop stack to come up before starting the recorder..."
 echo "   The teleoperator blocks until command_processor publishes, which needs the exo"
