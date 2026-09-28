@@ -25,11 +25,13 @@
 #   RESET_TIME_S              seconds between episodes     (default 15)
 #   FPS                       record rate                  (default 20, = command_rate)
 #   PUSH_TO_HUB               push the dataset to HF Hub   (default false)
+#   NO_STAMP                  keep repo_id verbatim, no    (default true; folder ==
+#                             _YYYYMMDD_HHMMSS timestamp    DATASET_REPO_ID exactly)
 #   MAX_COMMAND_AGE_S         teleop staleness tolerance   (default 2.0; see note below)
-#   STREAMING_ENCODING        encode video during record   (default true)
+#   STREAMING_ENCODING        encode video during record   (default false; see note below)
 #   ENCODER_THREADS           threads for streaming encode (default 2)
-#   NUM_IMAGE_WRITER_PROCS    frame-writer subprocesses    (default 1)
-#   RGB_VCODEC                rgb encoder codec            (default auto)
+#   NUM_IMAGE_WRITER_PROCS    frame-writer subprocesses    (default 4; only used when streaming off)
+#   RGB_VCODEC                rgb encoder codec            (default h264; not nvenc/av1 here)
 #   LEROBOT_VENV_PATH         venv holding BOTH lerobot and dexcontrol (default VENV_PATH)
 #   EXO_DEV_PORT              serial port for the exo      (default /dev/ttyUSB0)
 #   VENV_PATH                 python venv to activate      (default ~/venvs/dexmate)
@@ -128,6 +130,16 @@ RESET_TIME_S="${RESET_TIME_S:-15}"
 FPS="${FPS:-20}"
 # lerobot-record pushes to the HF Hub by default, which fails for a local repo_id.
 PUSH_TO_HUB="${PUSH_TO_HUB:-false}"
+# By default lerobot appends a _YYYYMMDD_HHMMSS tag to repo_id at CREATE time
+# (DatasetRecordConfig.stamp_repo_id), so each run is a fresh dataset dir and a
+# re-run never clobbers the last one. We pin no_stamp=true so the on-disk folder
+# is EXACTLY $DATASET_REPO_ID -- required for the per-session naming scheme that
+# aggregate_sessions.py discovers (local/<base>_s01, _s02, ...). Trade-off: you
+# must now give a UNIQUE DATASET_REPO_ID per session yourself; reusing one errors
+# (LeRobotDataset.create refuses an existing dir). To append instead, run
+# lerobot-record --resume=true against that repo_id by hand (not wired here). Set
+# NO_STAMP=false to restore lerobot's auto-timestamping.
+NO_STAMP="${NO_STAMP:-true}"
 
 # VegaExoJoycon.is_connected is a freshness check: it goes false when no
 # robot/safe_commands message has arrived within max_command_age_s, and
@@ -139,14 +151,42 @@ MAX_COMMAND_AGE_S="${MAX_COMMAND_AGE_S:-2.0}"
 
 # Encoding/writing knobs to keep the record loop near the target FPS. A starved
 # loop is what makes commands go stale (see MAX_COMMAND_AGE_S), so these two
-# problems share a fix. Streaming encoding avoids the per-episode encode stall;
-# a frame-writer subprocess keeps image writing off the loop thread. Bump one at
-# a time and watch both the loop Hz and teleop smoothness -- they compete for the
-# same cores as dexmotion/ruckig.
-STREAMING_ENCODING="${STREAMING_ENCODING:-true}"
+# problems share a fix.
+#
+# STREAMING_ENCODING is DELIBERATELY off (lerobot's own default). When on, the
+# video encoder runs INSIDE the record-loop process in per-camera threads, and
+# each frame does PIL->YUV + full-frame stats holding the GIL -- so two camera
+# threads plus the loop contend for one GIL and add_frame blocks ~100ms/camera on
+# a full queue, collapsing to 2-16 Hz. Switching the codec does NOT fix this
+# (only the C encode() releases the GIL, not the Python part). Off, add_frame just
+# hands frames to AsyncImageWriter SUBPROCESSES (fast PNG, off the loop, across
+# cores) and each episode is batch-encoded in parallel at its end, during the
+# reset pause. Cost: temp PNGs on disk during a take (~2400/episode for 2 cams at
+# 60s/20Hz) and a short encode stall per episode -- both cleaned up automatically.
+# NUM_IMAGE_WRITER_PROCS ONLY matters in this (non-streaming) mode.
+STREAMING_ENCODING="${STREAMING_ENCODING:-false}"
 ENCODER_THREADS="${ENCODER_THREADS:-2}"
-NUM_IMAGE_WRITER_PROCS="${NUM_IMAGE_WRITER_PROCS:-1}"
-RGB_VCODEC="${RGB_VCODEC:-auto}"
+NUM_IMAGE_WRITER_PROCS="${NUM_IMAGE_WRITER_PROCS:-4}"
+# h264 (software H.264 via libx264) is pinned. NOTE: lerobot's valid vcodec names
+# are h264/hevc/libsvtav1/libaom-av1/auto/<hw> -- "libx264" is REJECTED with a
+# ValueError, use "h264". `auto` picks h264_nvenc, whose avcodec_open2 fails with
+# "Operation not permitted" here (no usable NVENC session). libsvtav1 (software
+# AV1) is an offline codec -- far too slow for live capture: it can't drain the
+# streaming-encode queue at 20 Hz for two HD RGB streams, so add_frame blocks and
+# the record loop collapses to a 2-16 Hz sawtooth. h264 encodes the same frames
+# ~10-50x faster on CPU. Set RGB_VCODEC=h264_nvenc only once GPU encode is fixed;
+# do NOT go back to libsvtav1 on this box.
+RGB_VCODEC="${RGB_VCODEC:-h264}"
+
+# Head depth is captured by the follower (with_head_camera_depth defaults True) and
+# encoded LOSSLESS x265 (~32 Mbit/s) -- by far the heaviest encoder. When it can't
+# keep up its queue fills and the record loop blocks on the enqueue, which is what
+# makes the loop Hz sawtooth between ~2 and ~19 Hz ("Encoder queue full for
+# observation.images.head_camera_depth"). Set WITH_HEAD_DEPTH=false to drop the depth
+# stream entirely and hold a steady 20 Hz -- do that when the dataset does not need
+# depth. NOTE: this is the LeRobot follower's flag; omniteleop's own head_left_depth
+# toggle governs only omniteleop's MCAP recorder, not lerobot-record.
+WITH_HEAD_DEPTH="${WITH_HEAD_DEPTH:-true}"
 
 # --- Resolve the omniteleop repo root -----------------------------------------
 find_repo_root() {
@@ -252,15 +292,34 @@ done
 # use_external_commands=true: robot_controller owns the hardware, so send_action()
 # records the exo target without issuing a competing setpoint.
 # max_relative_target=null: the clamp only shapes commands we are not sending.
+# >>> HANDS DISABLED (2026-09-22): the F5D6 hands are not detected by the
+# controller, so they are not in the follower's controllable-component map.
+# with_left_hand/with_right_hand default to True on BOTH the follower (--robot.*)
+# AND the teleoperator (--teleop.*) -- their comment says the two must mirror each
+# other. If either side still declares the hands, recording fails: the follower's
+# connect() raises ConnectionError, or the teleoperator's get_action() raises
+# DeviceNotConnectedError ("Component 'left_hand' is missing ... never been seen").
+# Turning all FOUR off drops the hand joints from the recorded feature vector so
+# recording works. NOTE: datasets recorded now have NO hand columns and are NOT
+# layout-compatible with hand-enabled episodes. TO RE-ENABLE once the hands are
+# detected again, delete all four --robot.with_*_hand=false / --teleop.with_*_hand=false
+# lines below (defaults are True) and restore ROBOT_CONFIG in lab_connect.sh.
+# See HANDS_DISABLED.md in this repo.
 LEROBOT_CMD="lerobot-record \
   --robot.type=vega_1p_follower \
   --robot.id=vega_1p \
   --robot.use_external_commands=true \
+  --robot.with_left_hand=false \
+  --robot.with_right_hand=false \
   --robot.max_relative_target=null \
+  --robot.with_head_camera_depth=$WITH_HEAD_DEPTH \
   --teleop.type=vega_exo_joycon \
   --teleop.id=exo \
+  --teleop.with_left_hand=false \
+  --teleop.with_right_hand=false \
   --teleop.max_command_age_s=$MAX_COMMAND_AGE_S \
   --dataset.repo_id=$DATASET_REPO_ID \
+  --dataset.no_stamp=$NO_STAMP \
   --dataset.single_task=\"$DATASET_TASK\" \
   --dataset.num_episodes=$NUM_EPISODES \
   --dataset.episode_time_s=$EPISODE_TIME_S \

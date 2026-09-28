@@ -28,7 +28,16 @@ export ROBOT_NAME="dm/vg4e69870ce2-1p"
 export ZENOH_CONFIG="$HOME/.dexmate/comm/zenoh/dm_vg4e69870ce2-1p.dzcfg"
 # Follower config: this robot has dexterous hands with touch sensors -> f5d6.
 # Override before sourcing if you need a different end-effector variant.
-export ROBOT_CONFIG="${ROBOT_CONFIG:-vega_1p_f5d6}"
+#
+# >>> HANDS DISABLED (2026-09-22): the F5D6 hands are not detected by the
+# controller (query_hand_type() -> UNKNOWN), so dexcontrol disables the hand
+# components and omniteleop's robot_controller.py crashes trying to open them.
+# Using the no-hands variant (vega_1p) keeps arms/torso/head/chassis teleop and
+# recording working. TO RE-ENABLE once the hands are detected again, restore:
+#     export ROBOT_CONFIG="${ROBOT_CONFIG:-vega_1p_f5d6}"
+# and revert the with_left_hand/with_right_hand flags in launch_exo_lerobot.sh.
+# See HANDS_DISABLED.md in this repo.
+export ROBOT_CONFIG="${ROBOT_CONFIG:-vega_1p}"
 export ROBOT_IP="127.0.0.1"
 
 # ---- Robot host on the lab LAN ----
