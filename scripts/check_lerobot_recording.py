@@ -55,6 +55,29 @@ def parse_args() -> argparse.Namespace:
         help="Disable a component, camera or head_imu. Repeatable.",
     )
     parser.add_argument(
+        "--with",
+        dest="enabled",
+        action="append",
+        default=[],
+        metavar="NAME",
+        choices=[
+            "base_front_camera",
+            "base_back_camera",
+            "base_left_camera",
+            "base_right_camera",
+            "left_wrist_camera",
+            "right_wrist_camera",
+        ],
+        help="Enable an off-by-default camera (base_* or *_wrist_camera). Repeatable.",
+    )
+    parser.add_argument(
+        "--with-chassis",
+        default=False,
+        action=argparse.BooleanOptionalAction,
+        help="Record the mobile base: base.vx/vy/wz action + chassis proprio in "
+        "observation.state. Match launch_exo_lerobot.sh's WITH_CHASSIS.",
+    )
+    parser.add_argument(
         "--no-video",
         action="store_true",
         help="Describe cameras as image rather than video columns, matching --dataset.video=false.",
@@ -62,13 +85,19 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def build_config(disabled: list[str]) -> Vega1PFollowerConfig:
-    """Follower config with the requested with_* flags turned off.
+def build_config(disabled: list[str], enabled: list[str], with_chassis: bool) -> Vega1PFollowerConfig:
+    """Follower config with the requested with_* flags toggled.
 
     use_external_commands is forced on: this check must never reach the hardware.
     """
     overrides = {f"with_{name}": False for name in disabled}
-    return Vega1PFollowerConfig(id="recording_check", use_external_commands=True, **overrides)
+    overrides.update({f"with_{name}": True for name in enabled})
+    return Vega1PFollowerConfig(
+        id="recording_check",
+        use_external_commands=True,
+        with_chassis=with_chassis,
+        **overrides,
+    )
 
 
 def dataset_schema(follower: Vega1PFollower, use_video: bool) -> dict[str, dict]:
@@ -116,7 +145,14 @@ def sample(
     """Poll get_observation() and collect every per-frame problem seen."""
     declared = follower.observation_features
     cameras = follower.camera_features
-    joint_keys = list(follower.action_features)
+    # Every scalar feature (joint .pos + chassis proprio); finiteness-checked where it
+    # appears in the observation. Action-only keys like base.vx/vy/wz have no observation
+    # counterpart and are simply skipped below.
+    scalar_keys = [
+        key
+        for key, ftype in {**follower.observation_features, **follower.action_features}.items()
+        if ftype is float
+    ]
 
     meter = RateMeter()
     period = 1.0 / fps
@@ -140,7 +176,7 @@ def sample(
             elif frame.shape != shape:
                 problems.append(f"frame {n}: '{key}' has shape {frame.shape}, declared {shape}")
 
-        for key in joint_keys:
+        for key in scalar_keys:
             value = obs.get(key)
             if isinstance(value, (int, float)) and not math.isfinite(value):
                 problems.append(f"frame {n}: '{key}' is {value}")
@@ -154,7 +190,7 @@ def main() -> int:
     args = parse_args()
     load_module_env()
 
-    follower = Vega1PFollower(build_config(args.without))
+    follower = Vega1PFollower(build_config(args.without, args.enabled, args.with_chassis))
     report = Report("observation / action recording")
 
     print("Connecting (this also checks every enabled sensor is live and at the declared size)...")
@@ -204,8 +240,10 @@ def main() -> int:
             print(f"  {key:<26} {describe_value(obs.get(key))}")
 
         # A recorded action is the teleoperator's target. With no teleop attached the
-        # current state stands in: this step is about column names and dtypes, not values.
-        action = {key: float(obs[key]) for key in follower.action_features}
+        # current observation stands in: this step is about column names and dtypes, not
+        # values. Action keys with no observation counterpart (base.vx/vy/wz are
+        # velocity commands, not proprio) fall back to 0.0.
+        action = {key: float(obs.get(key, 0.0)) for key in follower.action_features}
 
         obs_frame = build_dataset_frame(features, obs, prefix=OBS_STR)
         action_frame = build_dataset_frame(features, action, prefix=ACTION)

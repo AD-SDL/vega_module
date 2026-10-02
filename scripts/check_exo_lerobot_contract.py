@@ -29,12 +29,27 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seconds", type=float, default=5.0, help="How long to sample.")
     parser.add_argument("--timeout", type=float, default=120.0, help="Wait for the first command.")
+    parser.add_argument(
+        "--with-chassis",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help="Include the mobile-base action keys (base.vx/vy/wz) in the parity check. "
+        "Must match launch_exo_lerobot.sh's WITH_CHASSIS (default true). Use --no-with-chassis "
+        "to check the stationary schema.",
+    )
     args = parser.parse_args()
 
     # The follower is only constructed, never connected: action_features is declared from
-    # config, so this needs no robot and no dexcontrol session.
-    follower = Vega1PFollower(Vega1PFollowerConfig(id="contract_check"))
-    teleop = VegaExoJoycon(VegaExoJoyconConfig(id="contract_check", connect_timeout_s=args.timeout))
+    # config, so this needs no robot and no dexcontrol session. with_chassis is set on BOTH
+    # sides, exactly as the launch script does, so the parity check covers the base keys.
+    follower = Vega1PFollower(
+        Vega1PFollowerConfig(id="contract_check", with_chassis=args.with_chassis)
+    )
+    teleop = VegaExoJoycon(
+        VegaExoJoyconConfig(
+            id="contract_check", connect_timeout_s=args.timeout, with_chassis=args.with_chassis
+        )
+    )
 
     print(f"Subscribing to '{teleop.config.commands_topic}' (namespace from ROBOT_NAME)...")
     teleop.connect()

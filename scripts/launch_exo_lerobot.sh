@@ -37,6 +37,10 @@
 #   VENV_PATH                 python venv to activate      (default ~/venvs/dexmate)
 #   LAUNCH_SENSORS            true to launch sensors       (default true)
 #   LAUNCH_TELEMETRY_VIEWER   true to open the viewer      (default false)
+#   WITH_CHASSIS              record mobile base action+   (default true; set on both
+#                             proprio                       --robot and --teleop)
+#   WITH_BASE_BACK_CAMERA     record base_back_camera      (default true)
+#   WITH_BASE_FRONT_CAMERA    record base_front_camera     (default true)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODULE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -120,7 +124,10 @@ LAUNCH_TELEMETRY_VIEWER="${LAUNCH_TELEMETRY_VIEWER:-false}"
 # this elsewhere only if that venv also has lerobot installed from the vega_1p branch.
 LEROBOT_VENV_PATH="${LEROBOT_VENV_PATH:-$VENV_PATH}"
 
-DATASET_REPO_ID="${DATASET_REPO_ID:-local/vega_exo}"
+# New base-aware schema (chassis + base cameras): default base name differs from the
+# stationary local/vega_exo so a fresh run never lands on an old stationary dataset dir.
+# Still give a UNIQUE repo_id per session (NO_STAMP=true; reusing one errors).
+DATASET_REPO_ID="${DATASET_REPO_ID:-local/vega_exo_base}"
 DATASET_TASK="${DATASET_TASK:-teleoperation}"
 NUM_EPISODES="${NUM_EPISODES:-10}"
 EPISODE_TIME_S="${EPISODE_TIME_S:-60}"
@@ -188,6 +195,17 @@ RGB_VCODEC="${RGB_VCODEC:-h264}"
 # toggle governs only omniteleop's MCAP recorder, not lerobot-record.
 WITH_HEAD_DEPTH="${WITH_HEAD_DEPTH:-true}"
 
+# Mobile-base recording (this script's purpose). WITH_CHASSIS records the base action
+# (base.vx/vy/wz from the teleop) + chassis proprio (steer angles + wheel velocities) in
+# observation.state, and is set on BOTH --robot and --teleop so their action schemas match
+# (check_exo_lerobot_contract.py enforces this). The two base cameras are the subset chosen
+# after the rate spike (back clears 20 Hz comfortably; front is lighting-dependent). Set any
+# of these false to fall back toward the stationary schema. NOTE: enabling/disabling any of
+# them changes the recorded feature vector -- do not mix runs into one dataset.
+WITH_CHASSIS="${WITH_CHASSIS:-true}"
+WITH_BASE_BACK_CAMERA="${WITH_BASE_BACK_CAMERA:-true}"
+WITH_BASE_FRONT_CAMERA="${WITH_BASE_FRONT_CAMERA:-true}"
+
 # --- Resolve the omniteleop repo root -----------------------------------------
 find_repo_root() {
     local dir="$1"
@@ -253,7 +271,11 @@ if [[ "$LAUNCH_SENSORS" == "true" ]]; then
     NANO_SSH="${NANO_USER}@${NANO_HOST}"
     # Non-interactive ssh doesn't source ~/.bashrc, so conda must be initialized
     # explicitly before activating the dexcontrol env on the Jetson.
-    BASE_SENSOR_CMD="ssh -t $VEGA_SSH \"source ~/miniconda3/etc/profile.d/conda.sh && conda activate dexcontrol && dexsensor launch --sensor base_camera --sensor lidar_3d_front --sensor lidar_3d_back\""
+    # Base USB surround cameras recorded by the follower (subset: back + front). The
+    # lidars still launch for the omniteleop/MCAP side but are NOT recorded by lerobot
+    # (deferred). Sensor names match the dexbot_utils fork's Vega1pConfig.sensors and the
+    # follower's --robot.with_base_*_camera flags below.
+    BASE_SENSOR_CMD="ssh -t $VEGA_SSH \"source ~/miniconda3/etc/profile.d/conda.sh && conda activate dexcontrol && dexsensor launch --sensor base_back_camera --sensor base_front_camera --sensor lidar_3d_front --sensor lidar_3d_back\""
     # Head camera is on the Nano, reached via the Jetson. The Nano has no
     # ROBOT_NAME env, so dexsensor would publish under the "default" namespace and
     # the follower (which subscribes under $ROBOT_NAME) never sees it; --robot
@@ -313,10 +335,14 @@ LEROBOT_CMD="lerobot-record \
   --robot.with_right_hand=false \
   --robot.max_relative_target=null \
   --robot.with_head_camera_depth=$WITH_HEAD_DEPTH \
+  --robot.with_chassis=$WITH_CHASSIS \
+  --robot.with_base_back_camera=$WITH_BASE_BACK_CAMERA \
+  --robot.with_base_front_camera=$WITH_BASE_FRONT_CAMERA \
   --teleop.type=vega_exo_joycon \
   --teleop.id=exo \
   --teleop.with_left_hand=false \
   --teleop.with_right_hand=false \
+  --teleop.with_chassis=$WITH_CHASSIS \
   --teleop.max_command_age_s=$MAX_COMMAND_AGE_S \
   --dataset.repo_id=$DATASET_REPO_ID \
   --dataset.no_stamp=$NO_STAMP \
