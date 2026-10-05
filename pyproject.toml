@@ -11,6 +11,7 @@ requires-python = ">=3.10"
 
 dependencies = [
     "madsci-node-module>=0.6.0",
+    "omniteleop>=0.5.2",
 ]
 
 [project.optional-dependencies]
