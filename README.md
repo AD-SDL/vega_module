@@ -21,6 +21,17 @@ cd ..
 ## LeRobot Integration
 
 ### Teleoperation (Exoskeleton)
+#### `Vega1PFollowerConfig`
+##### `lerobot/src/lerobot/robots/vega_1p/config_vega_1p_follower.py`
+`Vega1PFollowerConfig` contains the user-specified configuration parameters of this specific instance of the robot (follower).
+Ensure the class attributes agree with your `Vega1PFollowerConfig` and actual robot hardware, and change parameters to match your needs and preferences.
+
+Important Attributes
+| Attribute | Type | Description | 
+| ------------- | ------------- | ------------- |
+| `*_with` | `bool` | Follower feature key flags indicating which robot components and sensors to command and record. Must match `Vega1PFollowerConfig` flags and agree with Dexcontrol config files. |
+| `use_external_commands` | `bool = False` | Whether to drive Vega internally (LeRobot) or externally (omniteleop; teleoperation). |
+
 #### `VegaExoJoyconConfig`
 ##### `lerobot/src/lerobot/teleoperators/vega_exo_joycon/config_vega_exo_joycon.py`
 `VegaExoJoyconConfig` contains the user-specified configuration parameters of this specific instance of the teleoperator.
