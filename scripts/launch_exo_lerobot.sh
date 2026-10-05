@@ -14,8 +14,14 @@
 # differs from POSITION_GROUPS in flatten_lerobot_features.py -- episodes recorded here
 # are NOT layout-compatible with previously exported ones.
 #
-#   ./launch_exo_lerobot.sh          # launch each component in its own window
-#   ./launch_exo_lerobot.sh stop     # kill all teleop processes and sensors
+#   ./launch_exo_lerobot.sh                 # launch the full stack, then record
+#   ./launch_exo_lerobot.sh record [REPO]   # stack already up: SKIP sensors + omniteleop
+#                                           #   + calibration, start a fresh lerobot-record
+#                                           #   only. Optional REPO overrides DATASET_REPO_ID
+#                                           #   (give a NEW unique one per session). Use this
+#                                           #   to record back-to-back sessions without
+#                                           #   re-doing sensors/calibration.
+#   ./launch_exo_lerobot.sh stop            # kill all teleop processes and sensors
 #
 # Optional env vars (or set them in ../.env):
 #   DATASET_REPO_ID           dataset to write             (default local/vega_exo)
@@ -37,6 +43,10 @@
 #   VENV_PATH                 python venv to activate      (default ~/venvs/dexmate)
 #   LAUNCH_SENSORS            true to launch sensors       (default true)
 #   LAUNCH_TELEMETRY_VIEWER   true to open the viewer      (default false)
+#   WITH_CHASSIS              record mobile base action+   (default true; set on both
+#                             proprio                       --robot and --teleop)
+#   WITH_BASE_BACK_CAMERA     record base_back_camera      (default true)
+#   WITH_BASE_FRONT_CAMERA    record base_front_camera     (default true)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODULE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -109,6 +119,17 @@ if [[ "${1:-}" == "stop" ]]; then
     exit 0
 fi
 
+# record-only mode: the sensors + omniteleop stack are already up from a previous
+# run, so skip launching (and skip killing) them and go straight to a fresh
+# lerobot-record. Lets you start a new recording session back-to-back without
+# re-doing sensors and exoskeleton calibration. An optional 2nd arg overrides
+# DATASET_REPO_ID -- you must give a NEW unique one per session (NO_STAMP=true).
+RECORD_ONLY=false
+if [[ "${1:-}" == "record" || "${1:-}" == "record-only" ]]; then
+    RECORD_ONLY=true
+    CLI_REPO_ID="${2:-}"
+fi
+
 # --- Configuration ------------------------------------------------------------
 EXO_DEV_PORT="${EXO_DEV_PORT:-/dev/ttyUSB0}"
 VENV_PATH="${VENV_PATH:-$HOME/venvs/dexmate}"
@@ -120,7 +141,13 @@ LAUNCH_TELEMETRY_VIEWER="${LAUNCH_TELEMETRY_VIEWER:-false}"
 # this elsewhere only if that venv also has lerobot installed from the vega_1p branch.
 LEROBOT_VENV_PATH="${LEROBOT_VENV_PATH:-$VENV_PATH}"
 
-DATASET_REPO_ID="${DATASET_REPO_ID:-local/vega_exo}"
+# New base-aware schema (chassis + base cameras): default base name differs from the
+# stationary local/vega_exo so a fresh run never lands on an old stationary dataset dir.
+# Still give a UNIQUE repo_id per session (NO_STAMP=true; reusing one errors).
+DATASET_REPO_ID="${DATASET_REPO_ID:-local/vega_exo_base}"
+# In record-only mode a 2nd CLI arg (if given) wins over env/.env, so you can name
+# the new session inline: ./launch_exo_lerobot.sh record local/pickup_box_from_table_s04
+[[ -n "${CLI_REPO_ID:-}" ]] && DATASET_REPO_ID="$CLI_REPO_ID"
 DATASET_TASK="${DATASET_TASK:-teleoperation}"
 NUM_EPISODES="${NUM_EPISODES:-10}"
 EPISODE_TIME_S="${EPISODE_TIME_S:-60}"
@@ -188,6 +215,17 @@ RGB_VCODEC="${RGB_VCODEC:-h264}"
 # toggle governs only omniteleop's MCAP recorder, not lerobot-record.
 WITH_HEAD_DEPTH="${WITH_HEAD_DEPTH:-true}"
 
+# Mobile-base recording (this script's purpose). WITH_CHASSIS records the base action
+# (base.vx/vy/wz from the teleop) + chassis proprio (steer angles + wheel velocities) in
+# observation.state, and is set on BOTH --robot and --teleop so their action schemas match
+# (check_exo_lerobot_contract.py enforces this). The two base cameras are the subset chosen
+# after the rate spike (back clears 20 Hz comfortably; front is lighting-dependent). Set any
+# of these false to fall back toward the stationary schema. NOTE: enabling/disabling any of
+# them changes the recorded feature vector -- do not mix runs into one dataset.
+WITH_CHASSIS="${WITH_CHASSIS:-true}"
+WITH_BASE_BACK_CAMERA="${WITH_BASE_BACK_CAMERA:-true}"
+WITH_BASE_FRONT_CAMERA="${WITH_BASE_FRONT_CAMERA:-true}"
+
 # --- Resolve the omniteleop repo root -----------------------------------------
 find_repo_root() {
     local dir="$1"
@@ -213,11 +251,13 @@ if [[ -z "$OMNITELEOP_ROOT" || ! -d "$OMNITELEOP_ROOT/src/omniteleop" ]]; then
     done
 fi
 
-if [[ -z "$OMNITELEOP_ROOT" ]]; then
+# Only fatal for a full launch -- record-only never starts omniteleop, so it does
+# not need the repo root (the stack is already running).
+if [[ -z "$OMNITELEOP_ROOT" && "$RECORD_ONLY" != "true" ]]; then
     echo "-> ERROR: could not locate the omniteleop repo (no src/omniteleop found)." >&2
     exit 1
 fi
-echo "-> omniteleop repo root: $OMNITELEOP_ROOT"
+[[ -n "$OMNITELEOP_ROOT" ]] && echo "-> omniteleop repo root: $OMNITELEOP_ROOT"
 
 LAB_CONNECT_SCRIPT="$SCRIPT_DIR/lab_connect.sh"
 
@@ -248,12 +288,22 @@ SETUP="sudo chmod 666 $EXO_DEV_PORT && source \"$VENV_PATH/bin/activate\" && sou
 LEROBOT_SETUP="source \"$LEROBOT_VENV_PATH/bin/activate\" && source \"$LAB_CONNECT_SCRIPT\""
 
 # --- Optionally launch sensors (Jetson + Nano) --------------------------------
-if [[ "$LAUNCH_SENSORS" == "true" ]]; then
+# Skipped in record-only: the sensors are already publishing from the prior run.
+if [[ "$LAUNCH_SENSORS" == "true" && "$RECORD_ONLY" != "true" ]]; then
     VEGA_SSH="${VEGA_USER}@${VEGA_HOST}"
     NANO_SSH="${NANO_USER}@${NANO_HOST}"
     # Non-interactive ssh doesn't source ~/.bashrc, so conda must be initialized
     # explicitly before activating the dexcontrol env on the Jetson.
-    BASE_SENSOR_CMD="ssh -t $VEGA_SSH \"source ~/miniconda3/etc/profile.d/conda.sh && conda activate dexcontrol && dexsensor launch --sensor base_camera --sensor lidar_3d_front --sensor lidar_3d_back\""
+    # Base USB surround cameras recorded by the follower (subset: back + front). The
+    # lidars still launch for the omniteleop/MCAP side but are NOT recorded by lerobot
+    # (deferred). Sensor names match the dexbot_utils fork's Vega1pConfig.sensors and the
+    # follower's --robot.with_base_*_camera flags below.
+    # --robot $ROBOT_NAME is REQUIRED: the non-interactive conda shell on the Jetson has no
+    # ROBOT_NAME env, so dexsensor would publish under the "default" namespace (bare
+    # 'sensors/base_*_camera/rgb') and the follower -- which subscribes under
+    # '$ROBOT_NAME/sensors/...' -- would get zero frames and abort at connect() with
+    # "initialized but not delivering data". Same reason the head launch below needs it.
+    BASE_SENSOR_CMD="ssh -t $VEGA_SSH \"source ~/miniconda3/etc/profile.d/conda.sh && conda activate dexcontrol && dexsensor launch --robot $ROBOT_NAME --sensor base_back_camera --sensor base_front_camera --sensor lidar_3d_front --sensor lidar_3d_back\""
     # Head camera is on the Nano, reached via the Jetson. The Nano has no
     # ROBOT_NAME env, so dexsensor would publish under the "default" namespace and
     # the follower (which subscribes under $ROBOT_NAME) never sees it; --robot
@@ -266,27 +316,47 @@ if [[ "$LAUNCH_SENSORS" == "true" ]]; then
     read -rp "-> Check sensors are running, then press Enter to continue..."
 fi
 
-# --- Build the teleop component list ------------------------------------------
-# mcap_recorder.py is deliberately absent: lerobot-record is the recorder here.
-OMNITELEOP_CMDS=(
-    "python src/omniteleop/leader/joycon_reader.py"
-    "python src/omniteleop/leader/arm_reader.py"
-    "python src/omniteleop/follower/command_processor.py"
-    "python src/omniteleop/follower/robot_controller.py --interpolation-method linear"
-)
-if [[ "$LAUNCH_TELEMETRY_VIEWER" == "true" ]]; then
-    OMNITELEOP_CMDS+=("python src/omniteleop/tools/telemetry_viewer.py")
+# --- Launch the omniteleop stack (skipped in record-only) ---------------------
+if [[ "$RECORD_ONLY" != "true" ]]; then
+    # --- Build the teleop component list --------------------------------------
+    # mcap_recorder.py is deliberately absent: lerobot-record is the recorder here.
+    OMNITELEOP_CMDS=(
+        "python src/omniteleop/leader/joycon_reader.py"
+        "python src/omniteleop/leader/arm_reader.py"
+        "python src/omniteleop/follower/command_processor.py"
+        "python src/omniteleop/follower/robot_controller.py --interpolation-method linear"
+    )
+    if [[ "$LAUNCH_TELEMETRY_VIEWER" == "true" ]]; then
+        OMNITELEOP_CMDS+=("python src/omniteleop/tools/telemetry_viewer.py")
+    fi
+
+    # --- Clean up any stale processes, then launch ----------------------------
+    # Each component opens in its own window.
+    stop_teleop
+    read -rp "-> Get into default position to calibrate exoskeleton, then press Enter to launch..."
+
+    for cmd in "${OMNITELEOP_CMDS[@]}"; do
+        title="$(basename "$(echo "$cmd" | awk '{print $2}')")"
+        gnome-terminal --window --title="$title" -- bash -c "$SETUP && $cmd; exec bash"
+    done
+else
+    # record-only: the sensors + omniteleop stack are already running from a prior
+    # launch. Do NOT stop_teleop (it would kill the live stack via STALE_PATTERN,
+    # which includes robot_controller) and do NOT relaunch anything -- just start a
+    # fresh recorder below. Guard against the two footguns first.
+    echo "-> record-only: reusing the sensors + omniteleop stack already running."
+    if pgrep -f "lerobot-record" >/dev/null; then
+        echo "-> ERROR: a lerobot-record process is still running. Finish it first (Esc in" >&2
+        echo "   its window and let it finalize) before starting a new session, or you'll" >&2
+        echo "   record two datasets at once." >&2
+        exit 1
+    fi
+    if ! pgrep -f "command_processor\.py" >/dev/null || ! pgrep -f "robot_controller\.py" >/dev/null; then
+        echo "-> WARNING: command_processor.py / robot_controller.py not detected -- the" >&2
+        echo "   omniteleop stack may be down. record-only does not launch it; re-run without" >&2
+        echo "   'record' to bring up the full stack if the recorder can't connect." >&2
+    fi
 fi
-
-# --- Clean up any stale processes, then launch --------------------------------
-# Each component opens in its own window.
-stop_teleop
-read -rp "-> Get into default position to calibrate exoskeleton, then press Enter to launch..."
-
-for cmd in "${OMNITELEOP_CMDS[@]}"; do
-    title="$(basename "$(echo "$cmd" | awk '{print $2}')")"
-    gnome-terminal --window --title="$title" -- bash -c "$SETUP && $cmd; exec bash"
-done
 
 # --- LeRobot recorder ---------------------------------------------------------
 # use_external_commands=true: robot_controller owns the hardware, so send_action()
@@ -313,10 +383,14 @@ LEROBOT_CMD="lerobot-record \
   --robot.with_right_hand=false \
   --robot.max_relative_target=null \
   --robot.with_head_camera_depth=$WITH_HEAD_DEPTH \
+  --robot.with_chassis=$WITH_CHASSIS \
+  --robot.with_base_back_camera=$WITH_BASE_BACK_CAMERA \
+  --robot.with_base_front_camera=$WITH_BASE_FRONT_CAMERA \
   --teleop.type=vega_exo_joycon \
   --teleop.id=exo \
   --teleop.with_left_hand=false \
   --teleop.with_right_hand=false \
+  --teleop.with_chassis=$WITH_CHASSIS \
   --teleop.max_command_age_s=$MAX_COMMAND_AGE_S \
   --dataset.repo_id=$DATASET_REPO_ID \
   --dataset.no_stamp=$NO_STAMP \
