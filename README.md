@@ -60,13 +60,28 @@ pip install -e '.[dataset,hardware,training]'
 pip install -e '.[core_scripts,training]'
 ```
 
+### 4. Install the `dexcontrol' fork
+Dexmate is currently in the process of also converting dexcontrol to (accomodate) Rust. This fork and branch preserve the original mostly Python-only framework, which is needed to work with our `dexbot-utils` fork. This is likely a temporary solution until Dexmate releases a stable version of the repository with the Rust updates and a comprehensive update can be made to our own repositories to successfully integrate with the newest library versions.
+```python
+# In your project directory clone the dexcontrol fork.
+git clone https://github.com/AileenCleary/dexcontrol.git # Change to AD-SDL fork.
+cd dexcontrol
+
+# Switch to the Python-based branch.
+git checkout ad-sdl
+
+# Install with pip in a virtual environment (recommended).
+pip install -e .
+
+cd ..
+```
 ## LeRobot Integration
 
 ### Teleoperation (Exoskeleton)
 #### `Vega1PFollowerConfig`
 ##### `lerobot/src/lerobot/robots/vega_1p/config_vega_1p_follower.py`
 `Vega1PFollowerConfig` contains the user-specified configuration parameters of this specific instance of the robot (follower).
-Ensure the class attributes agree with your `Vega1PFollowerConfig` and actual robot hardware, and change parameters to match your needs and preferences.
+Ensure the class attributes agree with your `VegaExoJoyconConfig` and actual robot hardware, and change parameters to match your needs and preferences.
 
 Important Attributes
 | Attribute | Type | Description | 
