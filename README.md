@@ -47,8 +47,17 @@ git checkout vega_1p
 
 # Install with pip in a virtual environment (recommended).
 pip install -e .
+```
+This module requires some additional `lerobot` extras to enable full functionality. Run these commands from the same `lerobot` repository.
+```python
+# For dataset recording + editing (minimum required extras).
+pip install -e '.[dataset,hardware]'
 
-cd ..
+# If you'll also be training policies on this machine, add `training`.
+pip install -e '.[dataset,hardware,training]'
+
+# For convenience (`core_scripts`=`training`+`dataset`+`viz`).
+pip install -e '.[core_scripts,training]'
 ```
 
 ## LeRobot Integration
