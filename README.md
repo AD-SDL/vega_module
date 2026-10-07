@@ -16,6 +16,7 @@ pip install -e .
 
 cd ..
 ```
+
 ### 2. Install the `dexbot-utils' fork
 Recent updates to Dexmate's `dexbot-utils` Github Repository have converted the entire library to be Rust-based instead of Python. Our alternative fork maintains Python as the primary language, which allows us to locally modify the robot configuration files that `dexcontrol` uses to construct the config. We use this to add and enable the four base cameras (front, back, right, left) located in the chassis. 
 
@@ -27,6 +28,22 @@ cd omniteleop
 
 # Checkout the Python-based `base-cameras` branch.
 git checkout base-cameras
+
+# Install with pip in a virtual environment (recommended).
+pip install -e .
+
+cd ..
+```
+
+### 3. Install the `lerobot' fork
+Our `lerobot` fork adds the Dexmate Vega 1 Pro and the JoyCon Exoskeleton Teleoperator to the list of robots/teleoperators currently supported by LeRobot.
+```python
+# In your project directory clone the AD-SDL lerobot fork.
+git clone https://github.com/AD-SDL/lerobot.git
+cd lerobot
+
+# Checkout the Vega 1 Pro branch.
+git checkout vega_1p
 
 # Install with pip in a virtual environment (recommended).
 pip install -e .
