@@ -8,7 +8,7 @@ Currently, `omniteleop` lists `dexstream` as an optional dependency, but `leader
 Either install `dexstream` following the instructions on https://github.com/dexmate-ai/dexstream to be able to install `omniteleop` normally, or install the fork which guards against the import.
 ```python
 # In your project directory clone the omniteleop fork.
-git clone https://github.com/AileenCleary/omniteleop.git # Change to ADSDL fork.
+git clone https://github.com/AileenCleary/omniteleop.git # Change to AD-SDL fork.
 cd omniteleop
 
 # Install with pip in a virtual environment (recommended).
@@ -16,7 +16,23 @@ pip install -e .
 
 cd ..
 ```
+### 2. Install the `dexbot-utils' fork
+Recent updates to Dexmate's `dexbot-utils` Github Repository have converted the entire library to be Rust-based instead of Python. Our alternative fork maintains Python as the primary language, which allows us to locally modify the robot configuration files that `dexcontrol` uses to construct the config. We use this to add and enable the four base cameras (front, back, right, left) located in the chassis. 
 
+The Rust-based version has no reference to these sensors, and adding them would require installing additional tools. For now, the simplest solution is to temporarily continue with the Python-based framework in this fork, until another library requires the updated Rust version of `dexbot-utils` or additional sensors are added to the configuration files by Dexmate themselves.
+```python
+# In your project directory clone the dexbot-utils fork.
+git clone https://github.com/AileenCleary/dexbot-utils.git # Change to AD-SDL fork.
+cd omniteleop
+
+# Checkout the Python-based `base-cameras` branch.
+git checkout base-cameras
+
+# Install with pip in a virtual environment (recommended).
+pip install -e .
+
+cd ..
+```
 
 ## LeRobot Integration
 
