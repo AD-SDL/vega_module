@@ -18,7 +18,7 @@ cd ..
 ```
 
 ### 2. Install the `dexbot-utils' fork
-Recent updates to Dexmate's `dexbot-utils` Github Repository have converted the entire library to be Rust-based instead of Python. Our alternative fork maintains Python as the primary language, which allows us to locally modify the robot configuration files that `dexcontrol` uses to construct the config. We use this to add and enable the four base cameras (front, back, right, left) located in the chassis. 
+Recent updates to Dexmate's `dexbot-utils` Github Repository have converted the entire library to be Rust-based instead of Python. Our alternative fork maintains Python as the primary language, which allows us to locally modify the robot configuration files that `dexcontrol` uses to construct the config. We use this to add and enable the four base cameras (front, back, right, left) located in the chassis.
 
 The Rust-based version has no reference to these sensors, and adding them would require installing additional tools. For now, the simplest solution is to temporarily continue with the Python-based framework in this fork, until another library requires the updated Rust version of `dexbot-utils` or additional sensors are added to the configuration files by Dexmate themselves.
 ```python
@@ -84,7 +84,7 @@ cd ..
 Ensure the class attributes agree with your `VegaExoJoyconConfig` and actual robot hardware, and change parameters to match your needs and preferences.
 
 Important Attributes
-| Attribute | Type | Description | 
+| Attribute | Type | Description |
 | ------------- | ------------- | ------------- |
 | `*_with` | `bool` | Follower feature key flags indicating which robot components and sensors to command and record. Must match `Vega1PFollowerConfig` flags and agree with Dexcontrol config files. |
 | `use_external_commands` | `bool = False` | Whether to drive Vega internally (LeRobot) or externally (omniteleop; teleoperation). |
@@ -95,8 +95,8 @@ Important Attributes
 Ensure the class attributes agree with your `Vega1PFollowerConfig` and actual robot hardware, and change parameters to match your needs and preferences.
 
 Important Attributes
-| Attribute | Type | Description | 
+| Attribute | Type | Description |
 | ------------- | ------------- | ------------- |
 | `*_with` | `bool` | Teleoperator action key flags indicating which robot components to include. Must match `Vega1PFollowerConfig` flags. |
 | `connect_timeout_s` | `float = 120.0` | How long 'connect()' will wait for the first command message to be published. `omniteleop` blocks motion behind an `exo/robot_alignment` check AND a fresh e-stop release, so specific to operator needs. |
-| `max_command_age_s` | `float = 0.5` | The maximum time in seconds allowed between command messages. A command older than this indicates that Zenoh has stopped publishing. The `command_rate` is 20 Hz -> 20 messages per second -> 1 message every 0.05 seconds. So if `max_command_age_s`= 0.5 seconds -> 0.5/0.05 = ~10 missed messages. | 
+| `max_command_age_s` | `float = 0.5` | The maximum time in seconds allowed between command messages. A command older than this indicates that Zenoh has stopped publishing. The `command_rate` is 20 Hz -> 20 messages per second -> 1 message every 0.05 seconds. So if `max_command_age_s`= 0.5 seconds -> 0.5/0.05 = ~10 missed messages. |

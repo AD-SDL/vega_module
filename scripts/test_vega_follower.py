@@ -152,13 +152,19 @@ def run_command(assume_yes: bool) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     sub = parser.add_subparsers(dest="tier", required=True)
 
     read = sub.add_parser("read", help="connect + read one observation (read-only)")
-    read.add_argument("--cameras", action="store_true", help="also enable and validate camera/IMU streams")
+    read.add_argument(
+        "--cameras", action="store_true", help="also enable and validate camera/IMU streams"
+    )
 
-    command = sub.add_parser("command", help="connect + echo current pose as a setpoint (MOVES the robot)")
+    command = sub.add_parser(
+        "command", help="connect + echo current pose as a setpoint (MOVES the robot)"
+    )
     command.add_argument("-y", "--yes", action="store_true", help="skip the confirmation prompt")
 
     args = parser.parse_args()

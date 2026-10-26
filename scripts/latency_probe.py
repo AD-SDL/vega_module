@@ -34,7 +34,6 @@ from dataclasses import dataclass, field
 from typing import Dict, List
 
 import tyro
-
 from dexcomm import Node
 from dexcomm.codecs import DictDataCodec
 from omniteleop.common import get_config
@@ -44,8 +43,8 @@ from omniteleop.common import get_config
 class Stats:
     """Per-topic rolling samples (ms)."""
 
-    ages_ms: List[float] = field(default_factory=list)      # now - timestamp_ns
-    gaps_ms: List[float] = field(default_factory=list)      # inter-arrival on the wire
+    ages_ms: List[float] = field(default_factory=list)  # now - timestamp_ns
+    gaps_ms: List[float] = field(default_factory=list)  # inter-arrival on the wire
     _last_recv_ns: int = 0
 
     def add(self, stamp_ns: int, recv_ns: int) -> None:

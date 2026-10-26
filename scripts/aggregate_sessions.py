@@ -40,9 +40,9 @@ import shutil
 import sys
 from pathlib import Path
 
-from lerobot.utils.constants import HF_LEROBOT_HOME
 from lerobot.datasets.aggregate import aggregate_datasets
 from lerobot.datasets.dataset_metadata import LeRobotDatasetMetadata
+from lerobot.utils.constants import HF_LEROBOT_HOME
 
 
 def _dataset_dir(repo_id: str) -> Path:
@@ -81,12 +81,23 @@ def describe(repo_id: str) -> tuple[int, float, str]:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--base", help="Common base repo_id; discovers <base>_* sessions (e.g. local/vega_exo_box_pickup).")
-    ap.add_argument("--sessions", nargs="+", help="Explicit list of session repo_ids to merge (overrides --base discovery).")
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "--base",
+        help="Common base repo_id; discovers <base>_* sessions (e.g. local/vega_exo_box_pickup).",
+    )
+    ap.add_argument(
+        "--sessions",
+        nargs="+",
+        help="Explicit list of session repo_ids to merge (overrides --base discovery).",
+    )
     ap.add_argument("--out", help="Output repo_id for the merged dataset (default: --base).")
     ap.add_argument("--dry-run", action="store_true", help="List what would be merged and exit.")
-    ap.add_argument("--force", action="store_true", help="Delete the output dataset first if it already exists.")
+    ap.add_argument(
+        "--force", action="store_true", help="Delete the output dataset first if it already exists."
+    )
     args = ap.parse_args()
 
     if not args.base and not args.sessions:
@@ -102,14 +113,16 @@ def main() -> int:
         sessions = discover_sessions(args.base, out)
 
     if not sessions:
-        print(f"No session datasets found to merge (looked for '{args.base}_*' under {HF_LEROBOT_HOME}).")
+        print(
+            f"No session datasets found to merge (looked for '{args.base}_*' under {HF_LEROBOT_HOME})."
+        )
         return 1
 
     # Report what we found, and fail early on anything unreadable.
     print(f"Datasets root: {HF_LEROBOT_HOME}")
     print(f"Merging {len(sessions)} session(s) -> {out}\n")
     print(f"  {'repo_id':<45} {'episodes':>8}  {'fps':>5}  robot_type")
-    print(f"  {'-'*45} {'-'*8}  {'-'*5}  {'-'*10}")
+    print(f"  {'-' * 45} {'-' * 8}  {'-' * 5}  {'-' * 10}")
     total = 0
     problems = []
     for rid in sessions:
@@ -121,7 +134,7 @@ def main() -> int:
             continue
         total += n
         print(f"  {rid:<45} {n:>8}  {fps:>5.0f}  {robot}")
-    print(f"  {'-'*45} {'-'*8}")
+    print(f"  {'-' * 45} {'-' * 8}")
     print(f"  {'TOTAL':<45} {total:>8}\n")
 
     if problems:

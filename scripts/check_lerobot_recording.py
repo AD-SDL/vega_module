@@ -85,7 +85,9 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def build_config(disabled: list[str], enabled: list[str], with_chassis: bool) -> Vega1PFollowerConfig:
+def build_config(
+    disabled: list[str], enabled: list[str], with_chassis: bool
+) -> Vega1PFollowerConfig:
     """Follower config with the requested with_* flags toggled.
 
     use_external_commands is forced on: this check must never reach the hardware.
