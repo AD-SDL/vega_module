@@ -20,7 +20,8 @@ the same fps / robot_type / features, so a stray depth-on vs depth-off session
 
 Run with the venv that has lerobot importable (the dexmate teleop venv):
 
-    ~/venvs/dexmate/bin/python scripts/aggregate_sessions.py --base local/vega_exo_box_pickup --dry-run
+    ~/venvs/dexmate/bin/python scripts/aggregate_sessions.py \
+        --base local/vega_exo_box_pickup --dry-run
 
 Examples:
     # Preview what would be merged, newest naming scheme <base>_sNN
@@ -114,7 +115,8 @@ def main() -> int:
 
     if not sessions:
         print(
-            f"No session datasets found to merge (looked for '{args.base}_*' under {HF_LEROBOT_HOME})."
+            f"No session datasets found to merge (looked for '{args.base}_*' \
+                under {HF_LEROBOT_HOME})."
         )
         return 1
 

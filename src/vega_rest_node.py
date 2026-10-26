@@ -53,7 +53,8 @@ class VegaNode(RestNode):
                 self.logger.log_error(f"Error reading Vega state: {err}")
 
     def status_handler(self) -> None:
-        """Periodically called to update node status. Node stopped when either e-stopped or reading fails."""
+        """Periodically called to update node status.
+        Node stopped when either e-stopped or reading fails."""
         if self.vega is not None:
             try:
                 self.node_status.stopped = self.vega.is_estopped()
