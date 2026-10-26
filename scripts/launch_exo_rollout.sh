@@ -179,7 +179,7 @@ stop_rollout
 
 # >>> HANDS DISABLED (2026-09-22): F5D6 hands undetected, dropped from the follower's
 # controllable-component map. The policy was trained without hand columns, so keep the
-# hands off here too. See HANDS_DISABLED.md. (No --teleop.* flags: a rollout has no
+# hands off here too. See .docs/HANDS_DISABLED.md. (No --teleop.* flags: a rollout has no
 # teleoperator -- the policy produces the actions.)
 ROLLOUT_CMD="lerobot-rollout \
   --policy.path=$POLICY_PATH \

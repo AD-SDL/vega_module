@@ -374,7 +374,7 @@ fi
 # layout-compatible with hand-enabled episodes. TO RE-ENABLE once the hands are
 # detected again, delete all four --robot.with_*_hand=false / --teleop.with_*_hand=false
 # lines below (defaults are True) and restore ROBOT_CONFIG in lab_connect.sh.
-# See HANDS_DISABLED.md in this repo.
+# See .docs/HANDS_DISABLED.md.
 LEROBOT_CMD="lerobot-record \
   --robot.type=vega_1p_follower \
   --robot.id=vega_1p \

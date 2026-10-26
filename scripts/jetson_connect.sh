@@ -23,7 +23,7 @@ export ROBOT_NAME="dm/vg4e69870ce2-1p"
 # On the Jetson the comm config lives in the home dir, not ~/.dexmate/...
 export ZENOH_CONFIG="${ZENOH_CONFIG:-$HOME/dm_vg4e69870ce2-1p.dzcfg}"
 # Hands disabled (F5D6 undetected -> UNKNOWN). Same rationale as lab_connect.sh;
-# see HANDS_DISABLED.md. Override before sourcing to change the EE variant.
+# see .docs/HANDS_DISABLED.md. Override before sourcing to change the EE variant.
 export ROBOT_CONFIG="${ROBOT_CONFIG:-vega_1p}"
 # Local Zenoh router -- no tunnel, no port forward.
 export ROBOT_IP="127.0.0.1"
