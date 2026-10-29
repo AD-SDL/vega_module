@@ -50,68 +50,25 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODULE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$SCRIPT_DIR/_common.sh"
 
-# ssh options for the Nano hop (via the Jetson): a first-time or stale host-key
-# entry makes ssh refuse password auth, so skip known_hosts entirely.
-NANO_SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+# NANO_SSH_OPTS / SSH_OPTS come from _common.sh.
 
 # --- Load environment from ../.env (does not override already-set vars) ---------
 # Loaded before the `stop` command so it has the robot/Nano credentials needed
 # to reach and kill the remote sensors.
-ENV_FILE="$MODULE_ROOT/.env"
-if [[ -f "$ENV_FILE" ]]; then
-    echo "-> Loading environment from $ENV_FILE"
-    # `|| [[ -n "$key" ]]` processes a final line that has no trailing newline
-    # (otherwise the last var in .env is silently dropped).
-    while IFS='=' read -r key value || [[ -n "$key" ]]; do
-        [[ -z "$key" || "$key" == \#* ]] && continue
-        [[ -z "${!key+x}" ]] && export "$key=$value"
-    done < "$ENV_FILE"
-fi
+_load_env_file "$MODULE_ROOT/.env"
 
 # The processes this script launches (matched by their .py filenames, plus the LeRobot
 # CLI); used for both the `stop` command and the pre-launch stale cleanup.
-STALE_PATTERN="joycon_reader\.py|arm_reader\.py|command_processor\.py|robot_controller\.py|telemetry_viewer\.py|lerobot-record"
+# LEROBOT_STALE_PATTERN (in _common.sh) is this exact value (no mcap, has lerobot-record).
+STALE_PATTERN="$LEROBOT_STALE_PATTERN"
 
-stop_teleop() {
-    local pids
-    pids=$(pgrep -f "$STALE_PATTERN" || true)
-    if [[ -z "$pids" ]]; then
-        echo "-> No teleop processes running."
-        return
-    fi
-    echo "-> Stopping teleop processes: $pids"
-    # shellcheck disable=SC2086
-    kill -TERM $pids 2>/dev/null || true
-    for _ in $(seq 1 10); do
-        pgrep -f "$STALE_PATTERN" >/dev/null || break
-        sleep 0.5
-    done
-    pids=$(pgrep -f "$STALE_PATTERN" || true)
-    if [[ -n "$pids" ]]; then
-        echo "-> Force-killing leftovers: $pids"
-        # shellcheck disable=SC2086
-        kill -KILL $pids 2>/dev/null || true
-    fi
-}
+# stop_teleop: labels match the _common.sh core exactly ("Stopping teleop processes: " /
+# "No teleop processes running." / "Force-killing leftovers: "), so route through stop_local.
+stop_teleop() { stop_local "$STALE_PATTERN" "teleop processes"; }
 
-# Kill the sensors: the dexsensor binaries on the Jetson and the Nano, plus the
-# local ssh terminals that launched them. `pkill -x dexsensor` matches the binary
-# by name (not the ssh wrapper, whose command line also contains "dexsensor").
-stop_sensors() {
-    echo "-> Stopping sensors..."
-    if [[ -n "${VEGA_USER:-}" && -n "${VEGA_HOST:-}" ]]; then
-        local vega="$VEGA_USER@$VEGA_HOST"
-        ssh -o ConnectTimeout=8 "$vega" 'pkill -x dexsensor' 2>/dev/null || true
-        if [[ -n "${NANO_USER:-}" && -n "${NANO_HOST:-}" && -n "${NANO_PWD:-}" ]]; then
-            ssh -o ConnectTimeout=8 "$vega" \
-                "sshpass -p '$NANO_PWD' ssh $NANO_SSH_OPTS $NANO_USER@$NANO_HOST 'pkill -x dexsensor'" \
-                2>/dev/null || true
-        fi
-    fi
-    # Close the local sensor terminals (their command line contains "dexsensor launch").
-    pkill -f 'dexsensor launch' 2>/dev/null || true
-}
+# stop_sensors comes from _common.sh (unified; ConnectTimeout 8->10, the one accepted delta).
 
 if [[ "${1:-}" == "stop" ]]; then
     stop_teleop
@@ -227,29 +184,9 @@ WITH_BASE_BACK_CAMERA="${WITH_BASE_BACK_CAMERA:-true}"
 WITH_BASE_FRONT_CAMERA="${WITH_BASE_FRONT_CAMERA:-true}"
 
 # --- Resolve the omniteleop repo root -----------------------------------------
-find_repo_root() {
-    local dir="$1"
-    while [[ "$dir" != "/" ]]; do
-        if [[ -d "$dir/.git" || -f "$dir/pyproject.toml" || -f "$dir/setup.py" ]]; then
-            echo "$dir"; return 0
-        fi
-        dir="$(dirname "$dir")"
-    done
-    return 1
-}
-
-# Prefer the installed omniteleop location (editable install in the venv), since
-# that is the code the components actually run. Fall back to probing on disk.
-OMNITELEOP_ROOT=""
-PKG_DIR="$("$VENV_PATH/bin/python" -c "import omniteleop, os; print(os.path.realpath(os.path.dirname(omniteleop.__file__)))" 2>/dev/null || true)"
-[[ -n "$PKG_DIR" ]] && OMNITELEOP_ROOT="$(find_repo_root "$PKG_DIR" || true)"
-
-if [[ -z "$OMNITELEOP_ROOT" || ! -d "$OMNITELEOP_ROOT/src/omniteleop" ]]; then
-    OMNITELEOP_ROOT=""
-    for candidate in /home/rpl/humanoids/omniteleop "$MODULE_ROOT/../omniteleop" "$MODULE_ROOT/../Vega/omniteleop"; do
-        [[ -d "$candidate/src/omniteleop" ]] && { OMNITELEOP_ROOT="$(cd "$candidate" && pwd)"; break; }
-    done
-fi
+# resolve_omniteleop_root (in _common.sh) prefers the installed editable location, else
+# probes the on-disk candidates (incl. $MODULE_ROOT/../Vega/omniteleop).
+OMNITELEOP_ROOT="$(resolve_omniteleop_root)"
 
 # Only fatal for a full launch -- record-only never starts omniteleop, so it does
 # not need the repo root (the stack is already running).
@@ -278,7 +215,7 @@ fi
 # this (falling back to the ROBOT_NAME env var); the teleoperator subscribes under
 # it, so any remote sensor publisher must use the same value or its topics are
 # invisible. Sourced from lab_connect.sh to avoid duplicating the robot name.
-ROBOT_NAME="${ROBOT_NAME:-$(sed -n 's/^export ROBOT_NAME="\?\([^"]*\)"\?.*/\1/p' "$LAB_CONNECT_SCRIPT" | head -1)}"
+resolve_robot_name "$LAB_CONNECT_SCRIPT"
 
 # Requires a passwordless sudoers rule for this exact chmod command, e.g.:
 #   <your_username> ALL=(ALL) NOPASSWD: /usr/bin/chmod 666 /dev/ttyUSB0
@@ -289,31 +226,12 @@ LEROBOT_SETUP="source \"$LEROBOT_VENV_PATH/bin/activate\" && source \"$LAB_CONNE
 
 # --- Optionally launch sensors (Jetson + Nano) --------------------------------
 # Skipped in record-only: the sensors are already publishing from the prior run.
+# launch_sensors (in _common.sh) is the canonical body this script's block was the oracle
+# for: base_back + base_front cameras + lidars on the Jetson, head_camera on the Nano, each
+# with --robot $ROBOT_NAME, plus the /etc/dexmate traversability guard. It needs
+# VEGA_USER/VEGA_HOST exported (the .env/harness provides them).
 if [[ "$LAUNCH_SENSORS" == "true" && "$RECORD_ONLY" != "true" ]]; then
-    VEGA_SSH="${VEGA_USER}@${VEGA_HOST}"
-    NANO_SSH="${NANO_USER}@${NANO_HOST}"
-    # Non-interactive ssh doesn't source ~/.bashrc, so conda must be initialized
-    # explicitly before activating the dexcontrol env on the Jetson.
-    # Base USB surround cameras recorded by the follower (subset: back + front). The
-    # lidars still launch for the omniteleop/MCAP side but are NOT recorded by lerobot
-    # (deferred). Sensor names match the dexbot_utils fork's Vega1pConfig.sensors and the
-    # follower's --robot.with_base_*_camera flags below.
-    # --robot $ROBOT_NAME is REQUIRED: the non-interactive conda shell on the Jetson has no
-    # ROBOT_NAME env, so dexsensor would publish under the "default" namespace (bare
-    # 'sensors/base_*_camera/rgb') and the follower -- which subscribes under
-    # '$ROBOT_NAME/sensors/...' -- would get zero frames and abort at connect() with
-    # "initialized but not delivering data". Same reason the head launch below needs it.
-    BASE_SENSOR_CMD="ssh -t $VEGA_SSH \"source ~/miniconda3/etc/profile.d/conda.sh && conda activate dexcontrol && dexsensor launch --robot $ROBOT_NAME --sensor base_back_camera --sensor base_front_camera --sensor lidar_3d_front --sensor lidar_3d_back\""
-    # Head camera is on the Nano, reached via the Jetson. The Nano has no
-    # ROBOT_NAME env, so dexsensor would publish under the "default" namespace and
-    # the follower (which subscribes under $ROBOT_NAME) never sees it; --robot
-    # forces the right namespace.
-    HEAD_SENSOR_CMD="ssh -t $VEGA_SSH \"sshpass -p '$NANO_PWD' ssh -t $NANO_SSH_OPTS $NANO_SSH 'dexsensor launch --robot $ROBOT_NAME --sensor head_camera'\""
-
-    echo "-> Launching sensors on the Jetson and Nano..."
-    gnome-terminal --window --title="base_sensors" -- bash -c "$BASE_SENSOR_CMD; exec bash"
-    gnome-terminal --window --title="head_camera" -- bash -c "$HEAD_SENSOR_CMD; exec bash"
-    read -rp "-> Check sensors are running, then press Enter to continue..."
+    launch_sensors
 fi
 
 # --- Launch the omniteleop stack (skipped in record-only) ---------------------

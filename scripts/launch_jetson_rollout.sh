@@ -44,28 +44,25 @@
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODULE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$SCRIPT_DIR/_common.sh"
 
 # --- Load ../.env (does not override already-set vars) -------------------------
-ENV_FILE="$MODULE_ROOT/.env"
-if [[ -f "$ENV_FILE" ]]; then
-    echo "-> Loading environment from $ENV_FILE"
-    while IFS='=' read -r key value || [[ -n "$key" ]]; do
-        [[ -z "$key" || "$key" == \#* ]] && continue
-        [[ -z "${!key+x}" ]] && export "$key=$value"
-    done < "$ENV_FILE"
-fi
+_load_env_file "$MODULE_ROOT/.env"
 
-STALE_PATTERN="lerobot-rollout"
+STALE_PATTERN="$ROLLOUT_STALE_PATTERN"
 # Local writers that would fight the rollout for the joints. (omniteleop normally
 # runs on mj, not here -- that is why the warning below also points at mj.)
-OMNITELEOP_PATTERN="joycon_reader\.py|arm_reader\.py|command_processor\.py|robot_controller\.py|lerobot-record"
+OMNITELEOP_PATTERN="$OMNITELEOP_WRITER_PATTERN"
 
 # Nano (head camera host) -- reached directly from the Jetson over the robot net.
+# NANO_SSH_OPTS comes from _common.sh (same value).
 NANO_USER="${NANO_USER:-dexmate-nano}"
 NANO_HOST="${NANO_HOST:-192.168.50.22}"
 NANO_PWD="${NANO_PWD:-hello-dex}"
-NANO_SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
+# stop_rollout kept local (its "No rollout process running." / "Stopping rollout:" labels
+# can't both come from stop_local's single label). This script sources jetson_connect.sh
+# for ROBOT_NAME (local, no tunnel), so it does NOT use resolve_robot_name.
 stop_rollout() {
     local pids
     pids=$(pgrep -f "$STALE_PATTERN" || true)

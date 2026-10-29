@@ -17,19 +17,12 @@
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODULE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$SCRIPT_DIR/_common.sh"
 
-NANO_SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-SSH_OPTS="-o ConnectTimeout=10"
+# NANO_SSH_OPTS / SSH_OPTS come from _common.sh (SSH_OPTS=ConnectTimeout=10, same as before).
 
 # --- Load ../.env (does not override already-set vars) -------------------------
-ENV_FILE="$MODULE_ROOT/.env"
-if [[ -f "$ENV_FILE" ]]; then
-    echo "-> Loading environment from $ENV_FILE"
-    while IFS='=' read -r key value || [[ -n "$key" ]]; do
-        [[ -z "$key" || "$key" == \#* ]] && continue
-        [[ -z "${!key+x}" ]] && export "$key=$value"
-    done < "$ENV_FILE"
-fi
+_load_env_file "$MODULE_ROOT/.env"
 
 # --- Configuration ------------------------------------------------------------
 VENV_PATH="${VENV_PATH:-$HOME/venvs/dexmate}"
@@ -45,15 +38,19 @@ CONDA_SH_REMOTE="~/miniconda3/etc/profile.d/conda.sh"
 JETSON_VEGA_DIR="${JETSON_VEGA_DIR:-~/vega_module}"
 JETSON_CONNECT_REMOTE="$JETSON_VEGA_DIR/scripts/jetson_connect.sh"   # Jetson-local robot env (no tunnel)
 
-VEGA_SSH="${VEGA_USER:-dexmate}@${VEGA_HOST:-146.137.240.51}"
+# Export VEGA_USER/VEGA_HOST (not just VEGA_SSH) so _common.sh's stop_sensors guard fires.
+export VEGA_USER="${VEGA_USER:-dexmate}"
+export VEGA_HOST="${VEGA_HOST:-146.137.240.51}"
+VEGA_SSH="$VEGA_USER@$VEGA_HOST"
 
 # mj joycon and the Jetson stack must share one ROBOT_NAME (the Zenoh prefix).
-ROBOT_NAME="${ROBOT_NAME:-$(sed -n 's/^export ROBOT_NAME="\?\([^"]*\)"\?.*/\1/p' "$LAB_CONNECT_SCRIPT" | head -1)}"
+resolve_robot_name "$LAB_CONNECT_SCRIPT"
 
-JETSON_STALE_PATTERN="omni-arm|omni-cmd|omni-robot|omni-telemetry|arm_reader\.py|command_processor\.py|robot_controller\.py|telemetry_viewer\.py"
-MJ_STALE_PATTERN="joycon_reader\.py"
+# JETSON_STALE_PATTERN / MJ_STALE_PATTERN come from _common.sh.
 
 # --- stop helpers -------------------------------------------------------------
+# stop_mj kept local to preserve its exact labels ("Stopping mj joycon:" / "No mj joycon
+# process running.") -- stop_local's single label can't reproduce both.
 stop_mj() {
     local pids
     pids=$(pgrep -f "$MJ_STALE_PATTERN" || true)
@@ -67,6 +64,8 @@ stop_mj() {
     [[ -n "$pids" ]] && kill -KILL $pids 2>/dev/null || true
 }
 
+# This script's teardown message is "Jetson teleop stack" (the record-common variant says
+# "driving stack"), so keep it local rather than use stop_remote_stack's generic message.
 stop_jetson() {
     echo "-> Stopping Jetson teleop stack over ssh..."
     ssh $SSH_OPTS "$VEGA_SSH" "pkill -TERM -f '$JETSON_STALE_PATTERN'" 2>/dev/null || true
@@ -75,16 +74,7 @@ stop_jetson() {
     pkill -f "$JETSON_STALE_PATTERN" 2>/dev/null || true   # close the local ssh -t gnome-terminals too
 }
 
-stop_sensors() {
-    echo "-> Stopping sensors..."
-    ssh $SSH_OPTS "$VEGA_SSH" 'pkill -x dexsensor' 2>/dev/null || true
-    if [[ -n "${NANO_USER:-}" && -n "${NANO_HOST:-}" && -n "${NANO_PWD:-}" ]]; then
-        ssh $SSH_OPTS "$VEGA_SSH" \
-            "sshpass -p '$NANO_PWD' ssh $NANO_SSH_OPTS $NANO_USER@$NANO_HOST 'pkill -x dexsensor'" \
-            2>/dev/null || true
-    fi
-    pkill -f 'dexsensor launch' 2>/dev/null || true
-}
+# stop_sensors comes from _common.sh (unified).
 
 if [[ "${1:-}" == "stop" ]]; then
     stop_mj
@@ -130,23 +120,7 @@ jetson_term() {   # $1 = window title, $2 = remote command (run in the Jetson en
 
 # --- Sensors (same as the mj launcher: Jetson base cams/lidar + Nano head) -----
 if [[ "$LAUNCH_SENSORS" == "true" ]]; then
-    # /etc/dexmate periodically resets to 0700 root:root (a dexmate update/reinstall
-    # re-tightens it), which silently makes dexsensor see "0 sensors / Available: (none)"
-    # because the dexmate user can't traverse in to read the configs. Catch it here with
-    # a clear message instead of a cryptic "--sensor matched no configured sensors".
-    if ! ssh $SSH_OPTS "$VEGA_SSH" 'test -x /etc/dexmate' 2>/dev/null; then
-        echo "-> ERROR: /etc/dexmate is not traversable by dexmate -> dexsensor will see 0 sensors." >&2
-        echo "   Fix on the Jetson:  ssh $VEGA_SSH 'sudo chmod 711 /etc/dexmate'" >&2
-        echo "   (711 = traverse without listing; recurs after dexmate updates. See dexsensor-etc-perms.)" >&2
-        exit 1
-    fi
-    NANO_SSH="${NANO_USER}@${NANO_HOST}"
-    BASE_SENSOR_CMD="ssh -t $VEGA_SSH \"source $CONDA_SH_REMOTE && conda activate dexcontrol && dexsensor launch --robot $ROBOT_NAME --sensor base_back_camera --sensor base_front_camera --sensor lidar_3d_front --sensor lidar_3d_back\""
-    HEAD_SENSOR_CMD="ssh -t $VEGA_SSH \"sshpass -p '$NANO_PWD' ssh -t $NANO_SSH_OPTS $NANO_SSH 'dexsensor launch --robot $ROBOT_NAME --sensor head_camera'\""
-    echo "-> Launching sensors on the Jetson and Nano..."
-    gnome-terminal --window --title="base_sensors" -- bash -c "$BASE_SENSOR_CMD; exec bash"
-    gnome-terminal --window --title="head_camera" -- bash -c "$HEAD_SENSOR_CMD; exec bash"
-    read -rp "-> Check sensors are running, then press Enter to continue..."
+    launch_sensors "$CONDA_SH_REMOTE"
 fi
 
 # --- Clean stale processes, then calibrate + launch ---------------------------

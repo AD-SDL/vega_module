@@ -42,27 +42,21 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODULE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$SCRIPT_DIR/_common.sh"
 
-# ssh options for the Nano hop (via the Jetson): a first-time or stale host-key
-# entry makes ssh refuse password auth, so skip known_hosts entirely.
-NANO_SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+# NANO_SSH_OPTS / SSH_OPTS come from _common.sh.
 
 # --- Load environment from ../.env (does not override already-set vars) ---------
-ENV_FILE="$MODULE_ROOT/.env"
-if [[ -f "$ENV_FILE" ]]; then
-    echo "-> Loading environment from $ENV_FILE"
-    while IFS='=' read -r key value || [[ -n "$key" ]]; do
-        [[ -z "$key" || "$key" == \#* ]] && continue
-        [[ -z "${!key+x}" ]] && export "$key=$value"
-    done < "$ENV_FILE"
-fi
+_load_env_file "$MODULE_ROOT/.env"
 
 # The rollout process (the LeRobot CLI). Matched for both `stop` and stale cleanup.
-STALE_PATTERN="lerobot-rollout"
+STALE_PATTERN="$ROLLOUT_STALE_PATTERN"
 # The omniteleop hardware writers -- if ANY of these are up, a rollout would be a
 # second writer to the same joints. We refuse to launch while they run.
-OMNITELEOP_PATTERN="joycon_reader\.py|arm_reader\.py|command_processor\.py|robot_controller\.py|lerobot-record"
+OMNITELEOP_PATTERN="$OMNITELEOP_WRITER_PATTERN"
 
+# stop_rollout kept local: its labels ("Stopping rollout:" / "No rollout process
+# running.") can't both be produced by stop_local's single label. Same core body.
 stop_rollout() {
     local pids
     pids=$(pgrep -f "$STALE_PATTERN" || true)
@@ -85,21 +79,7 @@ stop_rollout() {
     fi
 }
 
-# Kill the sensors: the dexsensor binaries on the Jetson and the Nano, plus the
-# local ssh terminals that launched them.
-stop_sensors() {
-    echo "-> Stopping sensors..."
-    if [[ -n "${VEGA_USER:-}" && -n "${VEGA_HOST:-}" ]]; then
-        local vega="$VEGA_USER@$VEGA_HOST"
-        ssh -o ConnectTimeout=8 "$vega" 'pkill -x dexsensor' 2>/dev/null || true
-        if [[ -n "${NANO_USER:-}" && -n "${NANO_HOST:-}" && -n "${NANO_PWD:-}" ]]; then
-            ssh -o ConnectTimeout=8 "$vega" \
-                "sshpass -p '$NANO_PWD' ssh $NANO_SSH_OPTS $NANO_USER@$NANO_HOST 'pkill -x dexsensor'" \
-                2>/dev/null || true
-        fi
-    fi
-    pkill -f 'dexsensor launch' 2>/dev/null || true
-}
+# stop_sensors comes from _common.sh (unified; ConnectTimeout 8->10, the one accepted delta).
 
 if [[ "${1:-}" == "stop" ]]; then
     stop_rollout
@@ -153,25 +133,19 @@ if pgrep -f "$OMNITELEOP_PATTERN" >/dev/null; then
 fi
 
 # Robot namespace prefix for all Zenoh topics (sourced from lab_connect.sh).
-ROBOT_NAME="${ROBOT_NAME:-$(sed -n 's/^export ROBOT_NAME="\?\([^"]*\)"\?.*/\1/p' "$LAB_CONNECT_SCRIPT" | head -1)}"
+resolve_robot_name "$LAB_CONNECT_SCRIPT"
 
 # LeRobot needs the robot env (ROBOT_NAME, ZENOH_CONFIG, the tunnel). No exo serial
 # port and no omniteleop working directory -- the policy is the driver.
 LEROBOT_SETUP="source \"$LEROBOT_VENV_PATH/bin/activate\" && source \"$LAB_CONNECT_SCRIPT\""
 
 # --- Optionally launch sensors (Jetson + Nano) --------------------------------
+# launch_sensors (in _common.sh) uses the canonical base_back + base_front cameras + --robot
+# $ROBOT_NAME. This REPLACES this script's former single `--sensor base_camera` (no --robot)
+# -- the drift-#1 fix (the rollout follower subscribes under $ROBOT_NAME, so the old
+# unprefixed single camera meant the base cams were invisible). Needs VEGA_USER/VEGA_HOST.
 if [[ "$LAUNCH_SENSORS" == "true" ]]; then
-    VEGA_SSH="${VEGA_USER}@${VEGA_HOST}"
-    NANO_SSH="${NANO_USER}@${NANO_HOST}"
-    BASE_SENSOR_CMD="ssh -t $VEGA_SSH \"source ~/miniconda3/etc/profile.d/conda.sh && conda activate dexcontrol && dexsensor launch --sensor base_camera --sensor lidar_3d_front --sensor lidar_3d_back\""
-    # Head camera is on the Nano, reached via the Jetson; --robot forces the right
-    # namespace or the follower (subscribing under $ROBOT_NAME) never sees it.
-    HEAD_SENSOR_CMD="ssh -t $VEGA_SSH \"sshpass -p '$NANO_PWD' ssh -t $NANO_SSH_OPTS $NANO_SSH 'dexsensor launch --robot $ROBOT_NAME --sensor head_camera'\""
-
-    echo "-> Launching sensors on the Jetson and Nano..."
-    gnome-terminal --window --title="base_sensors" -- bash -c "$BASE_SENSOR_CMD; exec bash"
-    gnome-terminal --window --title="head_camera" -- bash -c "$HEAD_SENSOR_CMD; exec bash"
-    read -rp "-> Check sensors are running, then press Enter to continue..."
+    launch_sensors
 fi
 
 # --- Clean up any stale rollout, then build the command -----------------------
