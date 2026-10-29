@@ -64,7 +64,10 @@ PUSH_TO_HUB="${PUSH_TO_HUB:-false}"
 
 LAB_CONNECT_SCRIPT="$SCRIPT_DIR/lab_connect.sh"
 CONDA_SH_REMOTE="~/miniconda3/etc/profile.d/conda.sh"
-JETSON_CONNECT_REMOTE="~/humanoids/vega_module/scripts/jetson_connect.sh"
+# vega_module path ON THE JETSON (dexmate: ~/vega_module, no 'humanoids' parent). Override
+# JETSON_VEGA_DIR if the Jetson's layout differs.
+JETSON_VEGA_DIR="${JETSON_VEGA_DIR:-~/vega_module}"
+JETSON_CONNECT_REMOTE="$JETSON_VEGA_DIR/scripts/jetson_connect.sh"
 VEGA_SSH="${VEGA_USER:-dexmate}@${VEGA_HOST:-146.137.240.51}"
 ROBOT_NAME="${ROBOT_NAME:-$(sed -n 's/^export ROBOT_NAME="\?\([^"]*\)"\?.*/\1/p' "$LAB_CONNECT_SCRIPT" | head -1)}"
 
@@ -173,6 +176,16 @@ bring_up_split_stack() {
     local MJ_SETUP="source \"$VENV_PATH/bin/activate\" && source \"$LAB_CONNECT_SCRIPT\""
 
     if [[ "$LAUNCH_SENSORS" == "true" ]]; then
+        # /etc/dexmate periodically resets to 0700 root:root (a dexmate update/reinstall
+        # re-tightens it), which silently makes dexsensor see "0 sensors / Available: (none)"
+        # because the dexmate user can't traverse in to read the configs. Catch it with a
+        # clear message instead of a cryptic "--sensor matched no configured sensors".
+        if ! ssh $SSH_OPTS "$VEGA_SSH" 'test -x /etc/dexmate' 2>/dev/null; then
+            echo "-> ERROR: /etc/dexmate is not traversable by dexmate -> dexsensor will see 0 sensors." >&2
+            echo "   Fix on the Jetson:  ssh $VEGA_SSH 'sudo chmod 711 /etc/dexmate'" >&2
+            echo "   (711 = traverse without listing; recurs after dexmate updates. See dexsensor-etc-perms.)" >&2
+            exit 1
+        fi
         local NANO_SSH="${NANO_USER}@${NANO_HOST}"
         local BASE_SENSOR_CMD="ssh -t $VEGA_SSH \"source $CONDA_SH_REMOTE && conda activate dexcontrol && dexsensor launch --robot $ROBOT_NAME --sensor base_back_camera --sensor base_front_camera --sensor lidar_3d_front --sensor lidar_3d_back\""
         local HEAD_SENSOR_CMD="ssh -t $VEGA_SSH \"sshpass -p '$NANO_PWD' ssh -t $NANO_SSH_OPTS $NANO_SSH 'dexsensor launch --robot $ROBOT_NAME --sensor head_camera'\""
