@@ -245,7 +245,7 @@ lerobot-record \
   --dataset.episode_time_s=$EPISODE_TIME_S \
   --dataset.reset_time_s=$RESET_TIME_S \
   --dataset.fps=$FPS \
-  --dataset.resume=$resume \
+  --resume=$resume \
   --dataset.push_to_hub=$PUSH_TO_HUB \
   --dataset.streaming_encoding=$STREAMING_ENCODING \
   --dataset.encoder_threads=$ENCODER_THREADS \
