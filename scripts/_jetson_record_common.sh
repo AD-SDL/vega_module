@@ -62,6 +62,16 @@ NUM_IMAGE_WRITER_PROCS="${NUM_IMAGE_WRITER_PROCS:-4}"
 RGB_VCODEC="${RGB_VCODEC:-h264}"
 PUSH_TO_HUB="${PUSH_TO_HUB:-false}"
 
+# Episode control: "tty" (keyboard n/r/q in the record window) or "joycon" (drive
+# next/re-record/stop from the exo JoyCon over zenoh, headless). On the Jetson the record
+# window has no reliable focused TTY, so "joycon" is the better default here when an operator
+# is holding the exo. EPISODE_BTN_* map an action to a <side>_<button>. See
+# .docs/JOYCON_EPISODE_CONTROL.md.
+EPISODE_CONTROL="${EPISODE_CONTROL:-tty}"
+EPISODE_BTN_NEXT="${EPISODE_BTN_NEXT:-left_right}"
+EPISODE_BTN_RERECORD="${EPISODE_BTN_RERECORD:-left_left}"
+EPISODE_BTN_STOP="${EPISODE_BTN_STOP:-left_down}"
+
 LAB_CONNECT_SCRIPT="$SCRIPT_DIR/lab_connect.sh"
 CONDA_SH_REMOTE="~/miniconda3/etc/profile.d/conda.sh"
 # vega_module path ON THE JETSON (dexmate: ~/vega_module, no 'humanoids' parent). Override
@@ -221,7 +231,11 @@ bring_up_split_stack() {
 _build_record_cmd() {
     local repo_id="$1" nepi="$2" resume="$3"
     cat <<CMD
-lerobot-record \
+EPISODE_CONTROL=$EPISODE_CONTROL \
+  EPISODE_BTN_NEXT=$EPISODE_BTN_NEXT \
+  EPISODE_BTN_RERECORD=$EPISODE_BTN_RERECORD \
+  EPISODE_BTN_STOP=$EPISODE_BTN_STOP \
+  lerobot-record \
   --robot.type=vega_1p_follower \
   --robot.id=vega_1p \
   --robot.use_external_commands=true \

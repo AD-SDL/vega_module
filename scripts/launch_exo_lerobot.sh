@@ -47,6 +47,10 @@
 #                             proprio                       --robot and --teleop)
 #   WITH_BASE_BACK_CAMERA     record base_back_camera      (default true)
 #   WITH_BASE_FRONT_CAMERA    record base_front_camera     (default true)
+#   EPISODE_CONTROL           tty (keyboard) or joycon     (default tty)
+#   EPISODE_BTN_NEXT          joycon btn -> next episode   (default left_right)
+#   EPISODE_BTN_RERECORD      joycon btn -> re-record      (default left_left)
+#   EPISODE_BTN_STOP          joycon btn -> stop run       (default left_down)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODULE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -226,6 +230,18 @@ WITH_CHASSIS="${WITH_CHASSIS:-true}"
 WITH_BASE_BACK_CAMERA="${WITH_BASE_BACK_CAMERA:-true}"
 WITH_BASE_FRONT_CAMERA="${WITH_BASE_FRONT_CAMERA:-true}"
 
+# Episode control backend. "tty" is lerobot's keyboard listener (arrows/n/r/q in the
+# recorder window). "joycon" drives the same next/re-record/stop actions from the exo
+# JoyCon over zenoh -- headless, no focused terminal needed. The three EPISODE_BTN_*
+# values map an action to a <side>_<button>; edit one line to move an action. lerobot
+# reads these from its own environment, so they are prepended to the recorder command
+# below (gnome-terminal does not inherit this shell's env). See
+# .docs/JOYCON_EPISODE_CONTROL.md.
+EPISODE_CONTROL="${EPISODE_CONTROL:-tty}"
+EPISODE_BTN_NEXT="${EPISODE_BTN_NEXT:-left_right}"
+EPISODE_BTN_RERECORD="${EPISODE_BTN_RERECORD:-left_left}"
+EPISODE_BTN_STOP="${EPISODE_BTN_STOP:-left_down}"
+
 # --- Resolve the omniteleop repo root -----------------------------------------
 find_repo_root() {
     local dir="$1"
@@ -375,7 +391,11 @@ fi
 # detected again, delete all four --robot.with_*_hand=false / --teleop.with_*_hand=false
 # lines below (defaults are True) and restore ROBOT_CONFIG in lab_connect.sh.
 # See .docs/HANDS_DISABLED.md.
-LEROBOT_CMD="lerobot-record \
+LEROBOT_CMD="EPISODE_CONTROL=$EPISODE_CONTROL \
+  EPISODE_BTN_NEXT=$EPISODE_BTN_NEXT \
+  EPISODE_BTN_RERECORD=$EPISODE_BTN_RERECORD \
+  EPISODE_BTN_STOP=$EPISODE_BTN_STOP \
+  lerobot-record \
   --robot.type=vega_1p_follower \
   --robot.id=vega_1p \
   --robot.use_external_commands=true \

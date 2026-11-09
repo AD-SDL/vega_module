@@ -59,7 +59,7 @@ else
 fi
 
 echo "" >&2
-printf "-> median offset (Jetson - mj): %+d ns  (%.2f ms)\n" \
+printf -- "-> median offset (Jetson - mj): %+d ns  (%.2f ms)\n" \
     "$median" "$(echo "$median/1000000" | bc -l)" >&2
 echo "-> pass to a probe RUN ON THE JETSON:" >&2
 echo "   python latency_probe.py --skew-ns $median" >&2

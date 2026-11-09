@@ -76,9 +76,11 @@ python scripts/check_lerobot_teleop.py
   refuses an existing dir). To append instead, run `lerobot-record --resume=true` against
   that repo_id by hand (not wired into the launch script). Set `NO_STAMP=false` to restore
   lerobot's default auto-timestamping (`stamp_repo_id()` at dataset creation).
-- Episode control is keyboard-driven in the `lerobot-record` window: `→` end early,
+- Episode control defaults to keyboard in the `lerobot-record` window: `→` end early,
   `←` re-record last, `Esc` stop. Auto-advances after `EPISODE_TIME_S` then a
   `RESET_TIME_S` pause. This replaces the old JoyCon-button MCAP flow.
+  Optionally JoyCon-driven (`EPISODE_CONTROL=joycon`, left-dpad by default) for headless /
+  no-TTY use, esp. the Jetson path — see `.docs/JOYCON_EPISODE_CONTROL.md`.
 - Shutdown order: `Esc` the recorder and let it finish saving BEFORE stopping the
   omniteleop stack (its `Robot.shutdown()` stops hardware `robot_controller` still drives).
 - **Recorder crashes with `DeviceNotConnectedError: VegaExoJoycon is not connected`
