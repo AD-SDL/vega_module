@@ -37,7 +37,7 @@ export ZENOH_CONFIG="$HOME/.dexmate/comm/zenoh/dm_vg4e69870ce2-1p.dzcfg"
 #     export ROBOT_CONFIG="${ROBOT_CONFIG:-vega_1p_f5d6}"
 # and revert the with_left_hand/with_right_hand flags in launch_exo_lerobot.sh.
 # See .docs/HANDS_DISABLED.md.
-export ROBOT_CONFIG="${ROBOT_CONFIG:-vega_1p}"
+export ROBOT_CONFIG="${ROBOT_CONFIG:-vega_1p_gripper}"
 export ROBOT_IP="127.0.0.1"
 
 # ---- Robot host on the lab LAN ----
