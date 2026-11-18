@@ -1,27 +1,14 @@
 #!/usr/bin/env python3
-"""Plain-language command-staleness check for the Vega-1 Pro exo stack.
+"""Plain-language command-staleness check: age/wobble/rate of robot/safe_commands.
 
-Answers one question: when the robot acts on a teleop command, how old is that
-command? That age (in ms) is "command staleness" -- the lag you feel. It also
-reports the "wobble" (how much the staleness varies) and the command rate.
+The subset of latency_probe.py with no skew math (stamp + receipt on one machine).
+Run on the Jetson for an exact number; from mj it also carries the inter-machine clock
+skew (use latency_probe.py --skew-ns for a corrected mj figure). Drive the exo (e-stop
+released) while it runs. Subscribe-only.
 
-It subscribes to robot/safe_commands and computes  age = now - command_timestamp.
-That topic is stamped and received on the SAME machine, so there is no clock-skew
-math -- unlike latency_probe.py, there is no --skew-ns and no clock_skew.sh here.
+    python scripts/probes/staleness_check.py
 
-How to compare MJ vs direct-on-Vega:
-    1. On the Jetson:   source jetson_connect.sh && python staleness_check.py
-    2. From mj (tunnel): source lab_connect.sh   && python staleness_check.py
-    Compare the "typical" line. On-robot should be far smaller and far steadier.
-
-NOTE ON MJ: running from mj, the stamp is from the robot and "now" is from mj, so
-that number also carries the clock difference between the two machines. Treat the
-mj run as "much bigger and wobblier," not as an exact millisecond count. For an
-exact mj number, use latency_probe.py with --skew-ns. For the on-robot number
-(the one that matters), this script is exact.
-
-Drive the exo (e-stop released) while it runs, or no commands flow and there is
-nothing to measure. Subscribe-only: it cannot touch the control path.
+See .docs/SCRIPTS.md.
 """
 
 import statistics

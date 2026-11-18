@@ -1,19 +1,12 @@
 #!/usr/bin/env python
-"""Quick smoke test for the vega_1p_follower LeRobot robot.
+"""Smoke test for the vega_1p_follower LeRobot robot: `read` (read-only) / `command` (MOVES it).
 
-Two tiers, run separately:
+    source ~/humanoids/venvs/dexmate/bin/activate
+    source ~/humanoids/vega_module/scripts/connect.sh remote
+    python tests/test_vega_follower.py read [--cameras]
+    python tests/test_vega_follower.py command
 
-    read     connect + read one observation (read-only, no motion)
-    command  connect + send the current pose back as a setpoint (MOVES the robot)
-
-Prerequisites (in the same shell):
-    source /home/rpl/humanoids/venvs/dexmate/bin/activate
-    source /home/rpl/humanoids/vega_module/scripts/lab_connect.sh   # tunnel + ROBOT_NAME
-
-Examples:
-    python test_vega_follower.py read              # motors only, cameras/IMU off
-    python test_vega_follower.py read --cameras    # also validate camera streams
-    python test_vega_follower.py command           # requires the E-stop released
+See .docs/SCRIPTS.md.
 """
 
 from __future__ import annotations
@@ -27,11 +20,7 @@ from lerobot.robots.vega_1p_follower.vega_1p_follower import Vega1PFollower
 
 
 def build_config(with_sensors: bool, external_commands: bool) -> Vega1PFollowerConfig:
-    """Config with the camera/IMU sensors optionally disabled.
-
-    connect() requires every enabled sensor to already be streaming, so leaving
-    them off lets us test the dexcontrol link and joint reads on their own.
-    """
+    """Config with cameras/IMU optionally off (connect() refuses a non-streaming sensor)."""
     return Vega1PFollowerConfig(
         with_head_camera_left_rgb=with_sensors,
         with_head_camera_right_rgb=with_sensors,
@@ -48,8 +37,7 @@ def run_read(with_cameras: bool) -> None:
     print(f"-> Connected: {robot.is_connected}")
     try:
         obs = robot.get_observation()
-        # Images are the array-valued entries; joints are ".pos" scalars; anything
-        # else (e.g. the 10 head_imu quaternion/gyro/accel floats) is a scalar too.
+        # Images are array-valued; joints are ".pos" scalars; everything else is a scalar.
         images = {k: v for k, v in obs.items() if hasattr(v, "shape")}
         joints = {k: v for k, v in obs.items() if k.endswith(".pos") and k not in images}
         others = {k: v for k, v in obs.items() if k not in images and k not in joints}
@@ -68,10 +56,8 @@ def run_read(with_cameras: bool) -> None:
     print("-> Read test OK.")
 
 
-# Components with a position-mode enable/disable gate. dexcontrol brings them up disabled,
-# so a setpoint is ignored until their mode is set (normally robot_controller.py does this).
-# The head and arms use different APIs. Torso auto-idles and hands use a control-type mode
-# (mit/velocity/force), so neither has this gate -- both accept the no-op echo as-is.
+# Head + arms come up disabled and ignore setpoints until enabled (head/arms use different
+# APIs); torso and hands have no such gate and accept the no-op echo as-is.
 def _enable_position_components(dex_robot) -> list[str]:  # noqa: ANN001 -- dexcontrol Robot
     """Enable position control on head + both arms. Returns the ones enabled."""
     enabled: list[str] = []
@@ -108,9 +94,7 @@ def run_command(assume_yes: bool) -> None:
     estop_released = False
     enabled_components: list[str] = []
     try:
-        # The software E-Stop blocks control features, so a setpoint sent while it is
-        # active is silently a no-op. Release it here so this tier actually exercises
-        # commanding. The physical button cannot be cleared in software.
+        # Release the software e-stop so setpoints take effect; refuse the physical button.
         estop = robot.robot.estop
         if estop.is_button_pressed():
             raise RuntimeError(
@@ -125,20 +109,17 @@ def run_command(assume_yes: bool) -> None:
         estop_released = True
         print(f"-> Software E-Stop released: {not estop.is_software_estop_enabled()}")
 
-        # Enable the position-controlled components, or their echoed setpoint is ignored.
-        # Must follow the E-Stop release (the head refuses to enable while it is active).
+        # Enable position components (after the e-stop release; the head refuses before it).
         enabled_components = _enable_position_components(robot.robot)
-        time.sleep(0.5)  # let the mode changes take effect before commanding
+        time.sleep(0.5)
 
         obs = robot.get_observation()
-        # Echo the current joint positions back: a no-op setpoint. max_relative_target
-        # on the config still clamps each joint, so nothing can jump.
+        # Echo current positions back: a no-op setpoint; max_relative_target still clamps.
         action = {k: v for k, v in obs.items() if k.endswith(".pos")}
         sent = robot.send_action(action)
         print(f"-> Commanded {len(sent)} joints with their current positions (no motion expected).")
     finally:
-        # Disable what we enabled, then re-arm the software E-Stop before dropping the link,
-        # so we never leave the robot live after the test -- even if commanding raised above.
+        # Disable what we enabled, then re-arm the e-stop, so the robot is never left live.
         for comp in enabled_components:
             try:
                 _disable_position_component(robot.robot, comp)

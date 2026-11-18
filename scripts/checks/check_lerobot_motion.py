@@ -1,29 +1,12 @@
 #!/usr/bin/env python
-"""Move one Vega joint a small amount, down either control path, and report what happened.
+"""MOVES THE ROBOT: drive one joint through a small sinusoid, down either control path.
 
-Bring-up check that answers "can we command this robot at all". Reads the current pose,
-drives a single joint through one small sinusoid, and returns it to where it started --
-reporting how far it actually travelled, how well it tracked, and whether anything clamped.
+    source scripts/connect.sh remote
+    python scripts/checks/check_lerobot_motion.py --via lerobot --dry-run  # move nothing
+    python scripts/checks/check_lerobot_motion.py --via lerobot            # omniteleop stopped
+    python scripts/checks/check_lerobot_motion.py --via omniteleop         # robot_controller up
 
-Two paths, chosen with --via:
-
-  lerobot      Vega1PFollower.send_action() commands the hardware directly through
-               dexcontrol. LeRobot is the only writer, so omniteleop must be stopped.
-               Exercises the clamp in `max_relative_target`.
-
-  omniteleop   Publishes onto 'robot/safe_commands' and lets robot_controller.py execute
-               with its ruckig interpolation and safety validator. LeRobot is not involved.
-               Requires robot_controller.py up and command_processor.py down -- the latter
-               publishes the same topic, and two publishers fight over the robot.
-
-THIS SCRIPT MOVES THE ROBOT. Defaults are deliberately small: one head joint, 0.05 rad,
-one 4-second cycle. Keep a hand on the e-stop.
-
-    source scripts/lab_connect.sh
-    python scripts/check_lerobot_motion.py --via lerobot --dry-run   # print, move nothing
-    python scripts/check_lerobot_motion.py --via lerobot
-
-Exits non-zero if the preflight fails, the operator declines, or the robot did not move.
+Keep a hand on the e-stop. See .docs/SCRIPTS.md.
 """
 
 from __future__ import annotations
@@ -38,17 +21,11 @@ from typing import Any
 from _vega_checks import Report, confirm, load_module_env, pace, processes_running
 from lerobot.robots.vega_1p_follower.vega_1p_follower import VEGA_CAMERAS, VEGA_JOINTS
 
-# Zenoh topics, matching the `topics:` block of the active omniteleop config
-# (src/omniteleop/configs/<ROBOT_CONFIG>.yaml). dexcomm applies the ROBOT_NAME namespace.
 COMMANDS_TOPIC = "robot/safe_commands"
 JOINTS_TOPIC = "robot/joints"
 
-# Refuse a larger swing without --force. Well inside every joint's range from a neutral
-# pose, but this check has no joint-limit model of its own, so it stays timid.
-MAX_UNFORCED_AMPLITUDE = 0.3
-
-# Seconds spent ramping back to the start pose when the run ends or is interrupted.
-RETURN_S = 1.5
+MAX_UNFORCED_AMPLITUDE = 0.3  # rad; this check has no joint-limit model, so it stays timid
+RETURN_S = 1.5  # seconds ramping back to the start pose on exit
 
 
 def parse_args() -> argparse.Namespace:
@@ -130,8 +107,7 @@ class LeRobotDriver:
     def __init__(self, component: str, joints: list[str], clamp: float) -> None:
         from lerobot.robots.vega_1p_follower import Vega1PFollower, Vega1PFollowerConfig
 
-        # Only the target component is enabled, and every sensor is off: this check needs
-        # no camera or IMU stack, and connect() refuses when a declared sensor is silent.
+        # Only the target component, every sensor off: connect() refuses a silent sensor.
         flags: dict[str, Any] = {f"with_{name}": name == component for name in VEGA_JOINTS}
         flags.update({f"with_{name}": False for name in VEGA_CAMERAS})
         self.follower = Vega1PFollower(
@@ -153,10 +129,7 @@ class LeRobotDriver:
 
     def connect(self) -> None:
         self.follower.connect()
-        # The software E-Stop blocks control features, so a setpoint sent while it is active
-        # is silently a no-op -- the joint would never move and the check would fail. Release
-        # it here so this path actually commands. The physical button cannot be cleared in
-        # software; refuse rather than pretend we can.
+        # Release the software e-stop so setpoints take effect; refuse the physical button.
         estop = self.follower.robot.estop
         if estop.is_button_pressed():
             raise RuntimeError(
@@ -171,19 +144,12 @@ class LeRobotDriver:
         self._estop_released = True
         print(f"-> Software E-Stop released: {not estop.is_software_estop_enabled()}")
 
-        # Even with the E-Stop released, dexcontrol components come up disabled and silently
-        # ignore setpoints until their mode is set -- normally robot_controller.py does this,
-        # but on the direct lerobot path nothing does. Enable the target component now. The
-        # head must be enabled AFTER the E-Stop is released (it refuses otherwise).
+        # Components come up disabled and ignore setpoints until enabled; head after e-stop.
         self._set_component_mode(enable=True)
-        time.sleep(0.5)  # let the mode change take effect before commanding
+        time.sleep(0.5)
 
     def _set_component_mode(self, enable: bool) -> None:
-        """Enable (or disable) position control on the target component.
-
-        Distinct from the E-Stop. The head and arms use different mode APIs; other
-        components (torso, hands) are left as-is, assumed already controllable here.
-        """
+        """Enable/disable position control on the target component (head/arms differ)."""
         comp = getattr(self.follower.robot, self.component)
         if self.component == "head":
             comp.set_mode("enable" if enable else "disable")
@@ -222,9 +188,7 @@ class LeRobotDriver:
         )
 
     def close(self) -> None:
-        # Re-arm the software E-Stop before dropping the link, so the robot is never left
-        # live after the check -- even if the run raised mid-motion. Disable the component
-        # we enabled first; a failure here must not block teardown.
+        # Disable the component, then re-arm the e-stop, so the robot is never left live.
         if self.follower.is_connected:
             if self._component_enabled:
                 try:
@@ -249,8 +213,7 @@ class OmniteleopDriver:
         self.timeout = timeout
         self.node: Any | None = None
         self.publisher: Any | None = None
-        # Written from a zenoh callback thread, read by measure().
-        self._lock = threading.Lock()
+        self._lock = threading.Lock()  # _joints written from the zenoh callback thread
         self._joints: dict[str, list[float]] = {}
         self.max_tracking_error = 0.0
 
@@ -295,8 +258,7 @@ class OmniteleopDriver:
 
     def send(self, targets: dict[str, float]) -> dict[str, float]:
         assert self.publisher is not None
-        # The whole component vector goes out every step: robot_controller applies the pos
-        # array it is handed, so a short array would be interpreted positionally.
+        # The whole component vector every step: robot_controller reads the pos array positionally.
         self.publisher.publish(
             {
                 "timestamp_ns": time.time_ns(),
@@ -322,8 +284,7 @@ class OmniteleopDriver:
         )
 
     def close(self) -> None:
-        # The dexcomm session is process-local; dropping our references is enough, and the
-        # node must not be torn down in a way that disturbs robot_controller's own session.
+        # Drop references only; tearing the node down could disturb robot_controller's session.
         self.publisher = None
         self.node = None
 
@@ -339,7 +300,7 @@ def preflight(via: str) -> str | None:
                 f"robot_controller.py is running (pid {controller}) and drives the robot at "
                 f"100 Hz. LeRobot commanding the same joints would give the hardware two "
                 f"writers. Stop the teleop stack first:\n"
-                f"    ./scripts/launch_exo_teleop.sh stop"
+                f"    ./scripts/launch_teleop.sh remote stop"
             )
         return None
 
@@ -347,7 +308,7 @@ def preflight(via: str) -> str | None:
         return (
             "robot_controller.py is not running, so nothing would execute the published "
             "commands. Start the teleop stack first:\n"
-            "    ./scripts/launch_exo_teleop.sh"
+            "    ./scripts/launch_teleop.sh remote"
         )
     if processor:
         return (
@@ -395,8 +356,7 @@ def main() -> int:
         f"{trajectory[-1][0]:.1f}s)"
     )
 
-    # Ahead of --dry-run: an amplitude this check will not execute should be rejected when
-    # the operator first asks about it, not after they have read the trajectory and re-run.
+    # Reject an over-ceiling amplitude ahead of --dry-run, not after.
     if args.amplitude > MAX_UNFORCED_AMPLITUDE and not args.force:
         print(
             f"\nRefusing --amplitude {args.amplitude:g}: above the {MAX_UNFORCED_AMPLITUDE:g} rad "

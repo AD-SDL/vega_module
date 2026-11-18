@@ -1,37 +1,12 @@
 #!/usr/bin/env python
-"""Aggregate per-session LeRobot datasets into one big dataset.
+"""Aggregate per-session LeRobot datasets (<base>_sNN) into one <base> dataset.
 
-Workflow this supports: record each teleop session to its own repo_id with a
-common base and a session suffix, e.g.
+Run with a venv that has lerobot importable (the dexmate teleop venv):
 
-    DATASET_REPO_ID=local/vega_exo_box_pickup_s01 ... ./launch_exo_lerobot.sh
-    DATASET_REPO_ID=local/vega_exo_box_pickup_s02 ... ./launch_exo_lerobot.sh
-    ...
+    ~/venvs/dexmate/bin/python scripts/tools/aggregate_sessions.py --base local/box --dry-run
+    scripts/tools/aggregate_sessions.py --sessions local/box_s01 local/box_s03 --out local/box_all
 
-then merge the good ones into a single trainable dataset:
-
-    python scripts/aggregate_sessions.py --base local/vega_exo_box_pickup
-
-By default it discovers every `<base>_*` dataset on disk (except the output
-itself), prints a table of episode counts, and aggregates them into `<base>`.
-`lerobot.datasets.aggregate.aggregate_datasets` validates that all sessions share
-the same fps / robot_type / features, so a stray depth-on vs depth-off session
-(or a hand-enabled one) fails loudly instead of corrupting the merge.
-
-Run with the venv that has lerobot importable (the dexmate teleop venv):
-
-    ~/venvs/dexmate/bin/python scripts/aggregate_sessions.py \
-        --base local/vega_exo_box_pickup --dry-run
-
-Examples:
-    # Preview what would be merged, newest naming scheme <base>_sNN
-    aggregate_sessions.py --base local/vega_exo_box_pickup --dry-run
-
-    # Merge specific sessions into an explicit output id
-    aggregate_sessions.py --sessions local/box_s01 local/box_s03 --out local/box_all
-
-    # Re-merge, replacing an existing output dataset
-    aggregate_sessions.py --base local/vega_exo_box_pickup --force
+See .docs/SCRIPTS.md.
 """
 
 from __future__ import annotations
@@ -59,7 +34,7 @@ def _is_dataset(path: Path) -> bool:
 def discover_sessions(base: str, out: str) -> list[str]:
     """Find every `<base>_*` dataset on disk, excluding the output repo_id."""
     base_path = _dataset_dir(base)
-    parent = base_path.parent  # HF_LEROBOT_HOME/<namespace>
+    parent = base_path.parent
     namespace = str(Path(base).parent)  # e.g. "local"
     found = []
     for child in sorted(parent.glob(f"{base_path.name}_*")):

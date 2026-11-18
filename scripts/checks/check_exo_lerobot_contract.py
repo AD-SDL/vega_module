@@ -1,18 +1,10 @@
 #!/usr/bin/env python
-"""Verify the omniteleop -> LeRobot teleoperator contract before recording.
+"""Verify the omniteleop -> LeRobot teleoperator contract (no robot, no dataset).
 
-Bring-up check for `launch_exo_lerobot.sh`. Confirms that what omniteleop publishes on
-`robot/safe_commands` reshapes cleanly into the action dict `Vega1PFollower` expects --
-component names, DOF counts, key parity and publish rate -- without touching the robot
-or writing a dataset.
+    source scripts/connect.sh remote        # teleop stack must be publishing
+    python scripts/checks/check_exo_lerobot_contract.py
 
-Run it with the teleop stack up (joycon_reader + arm_reader + command_processor at
-minimum) and the lab environment sourced:
-
-    source scripts/lab_connect.sh
-    python scripts/check_exo_lerobot_contract.py
-
-Exits non-zero on any mismatch, so it also works as a pre-flight gate.
+Exits non-zero on any mismatch. See .docs/SCRIPTS.md.
 """
 
 from __future__ import annotations
@@ -34,14 +26,12 @@ def main() -> int:
         default=True,
         action=argparse.BooleanOptionalAction,
         help="Include the mobile-base action keys (base.vx/vy/wz) in the parity check. "
-        "Must match launch_exo_lerobot.sh's WITH_CHASSIS (default true). Use --no-with-chassis "
+        "Must match the record WITH_CHASSIS (default true; see record.env). Use --no-with-chassis "
         "to check the stationary schema.",
     )
     args = parser.parse_args()
 
-    # The follower is only constructed, never connected: action_features is declared from
-    # config, so this needs no robot and no dexcontrol session. with_chassis is set on BOTH
-    # sides, exactly as the launch script does, so the parity check covers the base keys.
+    # Constructed, never connected: action_features is declared from config.
     follower = Vega1PFollower(
         Vega1PFollowerConfig(id="contract_check", with_chassis=args.with_chassis)
     )
@@ -85,7 +75,6 @@ def main() -> int:
             return 1
         print("Keys match exactly, including order.")
 
-        # Rate check: command_rate is 20 Hz, so --dataset.fps above that just duplicates.
         print(f"\nSampling for {args.seconds:g}s...")
         seen, deadline = 0, time.monotonic() + args.seconds
         last_stamp = None

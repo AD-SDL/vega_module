@@ -13,7 +13,7 @@
 #
 # Differs from launch_exo_rollout.sh:
 #   * Activates the `rollout` CONDA env (not a venv).
-#   * Sources jetson_connect.sh (NO SSH tunnel; ROBOT_IP=127.0.0.1 is the local router).
+#   * Sources connect.sh local (NO SSH tunnel; ROBOT_IP=127.0.0.1 is the local router).
 #   * Headless: the rollout runs in the FOREGROUND of this terminal. Ctrl-C stops it
 #     (and triggers return-to-initial if RETURN_TO_INITIAL=true). No gnome-terminal.
 #   * This policy (acleary/act_box_pickup) consumes only head_camera RGB + state + IMU,
@@ -23,7 +23,7 @@
 #     clear the workspace, start near the episodes' initial pose, keep the step clamp
 #     (MAX_RELATIVE_TARGET) small until you trust the policy. Only ONE writer may drive
 #     the joints: make sure omniteleop / lerobot-record is STOPPED on mj
-#     (mj:  ./scripts/launch_exo_lerobot.sh stop) before you start this.
+#     (mj:  ./scripts/launch_teleop.sh remote stop) before you start this.
 #
 #   ./launch_jetson_rollout.sh          # run the policy rollout (foreground)
 #   ./launch_jetson_rollout.sh stop     # kill a background/other rollout process
@@ -100,7 +100,7 @@ RETURN_TO_INITIAL="${RETURN_TO_INITIAL:-true}"
 DISPLAY_DATA="${DISPLAY_DATA:-false}"
 LAUNCH_HEAD_CAMERA="${LAUNCH_HEAD_CAMERA:-false}"
 
-JETSON_CONNECT="$SCRIPT_DIR/jetson_connect.sh"
+CONNECT_SCRIPT="$SCRIPT_DIR/connect.sh"
 CONDA_SH="$HOME/miniconda3/etc/profile.d/conda.sh"
 
 # --- Activate conda env -------------------------------------------------------
@@ -133,7 +133,7 @@ fi
 
 # --- Jetson-local robot env (NO tunnel) ---------------------------------------
 # shellcheck disable=SC1090
-source "$JETSON_CONNECT"
+source "$CONNECT_SCRIPT" local
 
 # --- Head camera (Nano) -------------------------------------------------------
 # The policy needs head_camera RGB + IMU, published by the Nano. Joint state is
@@ -194,7 +194,7 @@ cat <<EOF
      - e-stop in hand and READY
      - workspace clear of people
      - robot near the pose your episodes began in
-     - omniteleop / lerobot-record STOPPED on mj (mj: ./scripts/launch_exo_lerobot.sh stop)
+     - omniteleop / lerobot-record STOPPED on mj (mj: ./scripts/launch_teleop.sh remote stop)
      - step clamp small for the first runs
 EOF
 read -rp "-> Press Enter to START the autonomous rollout (Ctrl-C to stop)..."

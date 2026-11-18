@@ -1,29 +1,14 @@
 #!/usr/bin/env python3
-"""Read-only teleop latency probe for the Vega-1 Pro exo stack.
+"""Read-only teleop latency probe: per-topic rate, jitter, and message age (subscribe-only).
 
-Subscribes (never publishes) to the two timestamped teleop topics and reports,
-per topic: inter-arrival rate + jitter, and message age (now - timestamp_ns) as
-median / p95 / max. Run it on the Jetson AND from mj (over the tunnel) to A/B
-what moving the stack on-robot bought you.
+Run on the Jetson (source connect.sh local) and from mj (source connect.sh remote) to
+A/B the on-robot win. Cross-machine exo_joycon age includes clock skew -> --skew-ns
+(from clock_skew.sh); robot/safe_commands is skew-free only on the Jetson. Drive the exo
+(e-stop released) while it runs.
 
-    exo_joycon          joycon_reader (on mj) -> Zenoh.  Age measured here = transit
-                        from mj + CLOCK SKEW between the two hosts (see --skew-ns).
-    robot/safe_commands command_processor output.  When this probe runs ON the
-                        Jetson, the stamp and the receipt share one clock, so the
-                        age is a clean command-staleness number (no skew term).
+    python scripts/probes/latency_probe.py --duration 30
 
-Single-writer safe: subscribe-only. It cannot touch the control path.
-
-Usage (on the Jetson, robot env sourced):
-    source ~/humanoids/vega_module/scripts/jetson_connect.sh
-    python ~/humanoids/vega_module/scripts/latency_probe.py --duration 30
-
-Usage (from mj, tunnel up, for the A/B):
-    source ~/humanoids/vega_module/scripts/lab_connect.sh
-    python ~/humanoids/vega_module/scripts/latency_probe.py --duration 30
-
-Drive the exo (release the e-stop) while it runs, or exo_joycon/safe_commands
-stay idle and you measure nothing useful.
+See .docs/SCRIPTS.md.
 """
 
 import statistics
@@ -81,11 +66,8 @@ def main(
 
     Args:
         duration: seconds to collect before printing the report.
-        skew_ns: clock offset (other_host - this_host) in ns, SUBTRACTED from the
-            exo_joycon age so cross-machine transit isn't polluted by clock skew.
-            Measure it with: on the Jetson `date +%s%N`, on mj `date +%s%N` run as
-            close together as possible (or chrony/ntp offset); positive if the
-            publisher's clock is ahead of this host's. Only affects exo_joycon.
+        skew_ns: clock offset (publisher - this host) in ns, subtracted from the
+            exo_joycon age; from clock_skew.sh. Only affects exo_joycon.
         exo_joycon_only: skip the robot/safe_commands subscription.
     """
     config = get_config()

@@ -2,7 +2,7 @@
 #
 # Launch (or stop) an autonomous policy ROLLOUT on the Vega-1 Pro with LeRobot.
 #
-# This is the deployment counterpart to launch_exo_lerobot.sh. Where the recorder
+# This is the deployment counterpart to launch_teleop.sh ... record. Where the recorder
 # runs the omniteleop stack as the hardware writer and the LeRobot follower merely
 # OBSERVES (use_external_commands=true, send_action a no-op), a rollout inverts that:
 #
@@ -13,7 +13,7 @@
 #     on the robot (see vega_1p_follower.py:391 -- the no-op branch is skipped).
 #   * omniteleop MUST NOT be running at the same time. Two writers fighting over the
 #     same joints is dangerous, so this script refuses to launch if it detects the
-#     omniteleop stack up (stop it first: ./launch_exo_lerobot.sh stop).
+#     omniteleop stack up (stop it first: ./launch_teleop.sh remote stop).
 #
 # >>> SAFETY: this drives a full-size humanoid autonomously from a freshly trained,
 #     unproven policy. Keep the e-stop joycon in hand and ready. Clear the workspace
@@ -132,7 +132,8 @@ WITH_HEAD_DEPTH="${WITH_HEAD_DEPTH:-false}"
 RETURN_TO_INITIAL="${RETURN_TO_INITIAL:-true}"
 DISPLAY_DATA="${DISPLAY_DATA:-false}"
 
-LAB_CONNECT_SCRIPT="$SCRIPT_DIR/lab_connect.sh"
+CONNECT_SCRIPT="$SCRIPT_DIR/connect.sh"
+source "$SCRIPT_DIR/_env.sh"
 
 # --- Preflight: env, imports, and the no-dual-writer guard ---------------------
 if ! "$LEROBOT_VENV_PATH/bin/python" -c "import lerobot, dexcontrol, dexcomm" 2>/dev/null; then
@@ -148,16 +149,16 @@ fi
 if pgrep -f "$OMNITELEOP_PATTERN" >/dev/null; then
     echo "-> ERROR: omniteleop / lerobot-record is still running. A rollout would be a" >&2
     echo "   SECOND writer to the robot. Stop it first:" >&2
-    echo "     $SCRIPT_DIR/launch_exo_lerobot.sh stop" >&2
+    echo "     $SCRIPT_DIR/launch_teleop.sh remote stop" >&2
     exit 1
 fi
 
-# Robot namespace prefix for all Zenoh topics (sourced from lab_connect.sh).
-ROBOT_NAME="${ROBOT_NAME:-$(sed -n 's/^export ROBOT_NAME="\?\([^"]*\)"\?.*/\1/p' "$LAB_CONNECT_SCRIPT" | head -1)}"
+# Robot namespace prefix for all Zenoh topics (read from connect.env).
+ROBOT_NAME="${ROBOT_NAME:-$(robot_name_from_env "$SCRIPT_DIR/connect.env")}"
 
 # LeRobot needs the robot env (ROBOT_NAME, ZENOH_CONFIG, the tunnel). No exo serial
 # port and no omniteleop working directory -- the policy is the driver.
-LEROBOT_SETUP="source \"$LEROBOT_VENV_PATH/bin/activate\" && source \"$LAB_CONNECT_SCRIPT\""
+LEROBOT_SETUP="source \"$LEROBOT_VENV_PATH/bin/activate\" && source \"$CONNECT_SCRIPT\" remote"
 
 # --- Optionally launch sensors (Jetson + Nano) --------------------------------
 if [[ "$LAUNCH_SENSORS" == "true" ]]; then

@@ -1,21 +1,10 @@
 #!/usr/bin/env python
-"""Verify what LeRobot observes and records from the Vega, without writing anything.
+"""Verify what LeRobot observes and records from the Vega (writes nothing, moves nothing).
 
-Bring-up check for `launch_exo_lerobot.sh`. Connects `Vega1PFollower`, polls
-`get_observation()` for a few seconds, and assembles the dataset frames `lerobot-record`
-would write -- confirming column names, shapes, dtypes and rate -- but creates no dataset
-and no files.
+    source scripts/connect.sh remote        # robot on, sensors publishing; no teleop stack
+    python scripts/checks/check_lerobot_recording.py
 
-Nothing is commanded. The follower is built with use_external_commands=True, so
-`send_action` returns its input without reaching the hardware, which lets the action path
-be exercised as safely as the observation one.
-
-Run it with the robot on and its sensors publishing, but with no teleop stack needed:
-
-    source scripts/lab_connect.sh
-    python scripts/check_lerobot_recording.py
-
-Exits non-zero on any mismatch, so it also works as a pre-flight gate.
+Exits non-zero on any mismatch. See .docs/SCRIPTS.md.
 """
 
 from __future__ import annotations
@@ -75,7 +64,7 @@ def parse_args() -> argparse.Namespace:
         default=False,
         action=argparse.BooleanOptionalAction,
         help="Record the mobile base: base.vx/vy/wz action + chassis proprio in "
-        "observation.state. Match launch_exo_lerobot.sh's WITH_CHASSIS.",
+        "observation.state. Match the record WITH_CHASSIS (see record.env).",
     )
     parser.add_argument(
         "--no-video",
@@ -147,9 +136,7 @@ def sample(
     """Poll get_observation() and collect every per-frame problem seen."""
     declared = follower.observation_features
     cameras = follower.camera_features
-    # Every scalar feature (joint .pos + chassis proprio); finiteness-checked where it
-    # appears in the observation. Action-only keys like base.vx/vy/wz have no observation
-    # counterpart and are simply skipped below.
+    # Scalar features (joint .pos + chassis proprio); action-only keys (base.vx/vy/wz) are skipped.
     scalar_keys = [
         key
         for key, ftype in {**follower.observation_features, **follower.action_features}.items()
@@ -241,10 +228,8 @@ def main() -> int:
         for key in follower.camera_features:
             print(f"  {key:<26} {describe_value(obs.get(key))}")
 
-        # A recorded action is the teleoperator's target. With no teleop attached the
-        # current observation stands in: this step is about column names and dtypes, not
-        # values. Action keys with no observation counterpart (base.vx/vy/wz are
-        # velocity commands, not proprio) fall back to 0.0.
+        # No teleop attached: the observation stands in for the action (names/dtypes, not values);
+        # velocity-command keys with no observation counterpart fall back to 0.0.
         action = {key: float(obs.get(key, 0.0)) for key in follower.action_features}
 
         obs_frame = build_dataset_frame(features, obs, prefix=OBS_STR)

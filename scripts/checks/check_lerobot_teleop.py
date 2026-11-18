@@ -1,23 +1,12 @@
 #!/usr/bin/env python
-"""Run the exact teleop loop `lerobot-record` runs, without recording anything.
+"""Run the exact passive teleop loop lerobot-record runs, without recording (moves nothing).
 
-Bring-up check for `launch_exo_lerobot.sh`. Connects the exoskeleton teleoperator and the
-follower in the passive configuration the recorder uses -- omniteleop's robot_controller.py
-keeps driving the robot at 100 Hz, LeRobot only observes -- then runs
-get_observation() -> get_action() -> send_action() at the record rate and reports whether
-the action, observation and dataset-frame paths hold together live.
+    source scripts/connect.sh remote
+    ./scripts/launch_teleop.sh remote       # full stack up, exo in hand
+    python scripts/checks/check_lerobot_teleop.py
 
-This script cannot move the robot. use_external_commands is forced on, which makes
-`send_action` return its input without touching hardware, and the script aborts if that
-flag is ever false.
-
-Run it with the full teleop stack up and the exoskeleton in hand:
-
-    source scripts/lab_connect.sh
-    ./scripts/launch_exo_teleop.sh
-    python scripts/check_lerobot_teleop.py
-
-Exits non-zero on a key mismatch, a stale command stream, or a run in which no joint moved.
+Exits non-zero on a key mismatch, a stale command stream, or no joint moving.
+See .docs/SCRIPTS.md.
 """
 
 from __future__ import annotations
@@ -260,9 +249,7 @@ def main() -> int:
 
             return report.finish()
         finally:
-            # The follower first: its dexcontrol.Robot.shutdown() issues component stop()
-            # calls on hardware robot_controller is still driving, so it must not outlive
-            # the loop while the teleoperator holds the session open.
+            # Follower first: its shutdown() stops hardware robot_controller is still driving.
             follower.disconnect()
     finally:
         teleop.disconnect()

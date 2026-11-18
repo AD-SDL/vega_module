@@ -48,40 +48,45 @@ ruff format .
 
 ## Bring-up Checks (real hardware)
 
-Pre-flight gates for `scripts/launch_exo_lerobot.sh`. Each exits non-zero on failure, and
-each needs the lab environment sourced first: `source scripts/lab_connect.sh`.
+Pre-flight gates for `scripts/launch_teleop.sh ... record`. Each exits non-zero on failure, and
+each needs the robot environment sourced first: `source scripts/connect.sh remote`.
 
 ```bash
 # Contract only - no robot, no connection. Needs the teleop stack publishing.
-python scripts/check_exo_lerobot_contract.py
+python scripts/checks/check_exo_lerobot_contract.py
 
 # Observations, action keys and dataset schema. Moves nothing, writes nothing.
-python scripts/check_lerobot_recording.py
+python scripts/checks/check_lerobot_recording.py
 
 # Moves one joint a small amount. --dry-run prints the trajectory and exits.
-python scripts/check_lerobot_motion.py --via lerobot      # omniteleop must be stopped
-python scripts/check_lerobot_motion.py --via omniteleop   # robot_controller up, command_processor down
+python scripts/checks/check_lerobot_motion.py --via lerobot      # omniteleop must be stopped
+python scripts/checks/check_lerobot_motion.py --via omniteleop   # robot_controller up, command_processor down
 
 # The passive loop lerobot-record runs, minus the dataset. Full stack up, exo in hand.
-python scripts/check_lerobot_teleop.py
+python scripts/checks/check_lerobot_teleop.py
 ```
 
-## Recording (`scripts/launch_exo_lerobot.sh`)
+## Recording (`scripts/launch_teleop.sh <remote|local> record`)
 
-- Datasets land in `~/.cache/huggingface/lerobot/<repo_id>` — the launch script pins
+Recording is folded into the teleop launcher: `launch_teleop.sh <target> record` brings up the
+stack then records; `record-only` attaches a recorder to a running stack; `stop` tears down.
+Settings resolve CLI/shell > `record-datasets/<DATASET>.env` > `record.env` > `../.env`. The
+full operator story — CLI grammar, new-dataset-vs-resume, the disk-scanning `_sNN` auto-suffix,
+`RECORD_MODE` fixed/interactive/joycon, dataset-env folder — is in **`.docs/RECORD.md`**; the
+per-knob encoder/freshness rationale is in `scripts/record.env`. The crash diagnostics below are
+the hard-won bits worth keeping close.
+
+- Datasets land in `~/.cache/huggingface/lerobot/<repo_id>` — the record lib pins
   `--dataset.no_stamp=true` (`NO_STAMP` env var), so the folder is EXACTLY `DATASET_REPO_ID`
   with no `_<timestamp>` suffix. This is required for the per-session naming scheme that
-  `scripts/aggregate_sessions.py` discovers (`local/<base>_s01`, `_s02`, ...). Trade-off:
-  give a UNIQUE `DATASET_REPO_ID` per session — reusing one errors (`LeRobotDataset.create`
-  refuses an existing dir). To append instead, run `lerobot-record --resume=true` against
-  that repo_id by hand (not wired into the launch script). Set `NO_STAMP=false` to restore
-  lerobot's default auto-timestamping (`stamp_repo_id()` at dataset creation).
-- Episode control defaults to keyboard in the `lerobot-record` window: `→` end early,
-  `←` re-record last, `Esc` stop. Auto-advances after `EPISODE_TIME_S` then a
-  `RESET_TIME_S` pause. This replaces the old JoyCon-button MCAP flow.
-  Optionally JoyCon-driven (`EPISODE_CONTROL=joycon`, left-dpad by default) for headless /
-  no-TTY use, esp. the Jetson path — see `.docs/JOYCON_EPISODE_CONTROL.md`.
-- Shutdown order: `Esc` the recorder and let it finish saving BEFORE stopping the
+  `scripts/tools/aggregate_sessions.py` discovers (`local/<base>_s01`, `_s02`, ...). Chunked
+  runs auto-iterate `_sNN` (disk-scanned, continues across sessions); resume appends to one
+  `repo_id` via `--resume=true`. `NO_STAMP=false` restores lerobot's auto-timestamping.
+- Episode control = `RECORD_MODE`: `interactive` (TTY keys in the record window: `→` end early,
+  `←` re-record, `Esc` stop; auto-advance after `EPISODE_TIME_S` + `RESET_TIME_S` pause),
+  `fixed` (headless timed), or `joycon` (exo JoyCon over zenoh, the default, no TTY — see
+  `.docs/JOYCON_EPISODE_CONTROL.md`).
+- Shutdown order: `stop` kills the recorder first and lets it finish saving BEFORE stopping the
   omniteleop stack (its `Robot.shutdown()` stops hardware `robot_controller` still drives).
 - **Recorder crashes with `DeviceNotConnectedError: VegaExoJoycon is not connected`
   mid-episode**: `VegaExoJoycon.is_connected` is a freshness check on `robot/safe_commands`;

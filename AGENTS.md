@@ -48,22 +48,22 @@ ruff format .
 
 ## Bring-up Checks (real hardware)
 
-Pre-flight gates for `scripts/launch_exo_lerobot.sh`. Each exits non-zero on failure, and
-each needs the lab environment sourced first: `source scripts/lab_connect.sh`.
+Pre-flight gates for `scripts/launch_teleop.sh ... record`. Each exits non-zero on failure, and
+each needs the robot environment sourced first: `source scripts/connect.sh remote`.
 
 ```bash
 # Contract only - no robot, no connection. Needs the teleop stack publishing.
-python scripts/check_exo_lerobot_contract.py
+python scripts/checks/check_exo_lerobot_contract.py
 
 # Observations, action keys and dataset schema. Moves nothing, writes nothing.
-python scripts/check_lerobot_recording.py
+python scripts/checks/check_lerobot_recording.py
 
 # Moves one joint a small amount. --dry-run prints the trajectory and exits.
-python scripts/check_lerobot_motion.py --via lerobot      # omniteleop must be stopped
-python scripts/check_lerobot_motion.py --via omniteleop   # robot_controller up, command_processor down
+python scripts/checks/check_lerobot_motion.py --via lerobot      # omniteleop must be stopped
+python scripts/checks/check_lerobot_motion.py --via omniteleop   # robot_controller up, command_processor down
 
 # The passive loop lerobot-record runs, minus the dataset. Full stack up, exo in hand.
-python scripts/check_lerobot_teleop.py
+python scripts/checks/check_lerobot_teleop.py
 ```
 
 ## Key Classes

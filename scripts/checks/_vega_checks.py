@@ -1,9 +1,4 @@
-"""Shared helpers for the `check_lerobot_*.py` bring-up checks.
-
-Imported as a plain sibling module (`from _vega_checks import ...`), which works because
-Python puts a script's own directory on `sys.path`. Nothing here imports lerobot, dexcomm
-or dexcontrol, so `--help` and `--dry-run` stay usable off the robot.
-"""
+"""Shared helpers for the check_*.py bring-up checks. Sibling import; see .docs/SCRIPTS.md."""
 
 from __future__ import annotations
 
@@ -16,15 +11,10 @@ from typing import Any
 
 import numpy as np
 
-MODULE_ROOT = Path(__file__).resolve().parent.parent
+MODULE_ROOT = Path(__file__).resolve().parents[2]
 
 
 def load_module_env(path: Path | None = None) -> None:
-    """Read `../.env` into the environment without overriding variables already set.
-
-    Same precedence the launch scripts use, so running a check by hand behaves like
-    running it from `launch_exo_lerobot.sh`.
-    """
     env_file = path or MODULE_ROOT / ".env"
     if not env_file.is_file():
         return
@@ -37,11 +27,7 @@ def load_module_env(path: Path | None = None) -> None:
 
 
 def processes_running(pattern: str) -> list[int]:
-    """PIDs whose full command line matches `pattern`, as `pgrep -f` reports them.
-
-    Our own PID is filtered out: a check invoked with the pattern in its argv would
-    otherwise find itself.
-    """
+    """`pgrep -f` PIDs matching `pattern`, minus our own (the pattern can be in our argv)."""
     result = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True, check=False)
     return [pid for pid in (int(p) for p in result.stdout.split()) if pid != os.getpid()]
 
