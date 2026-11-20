@@ -141,8 +141,12 @@ if [[ "$LAUNCH_SENSORS" == "true" ]]; then
         exit 1
     fi
     NANO_SSH="${NANO_USER}@${NANO_HOST}"
-    BASE_SENSOR_CMD="ssh -t $VEGA_SSH \"source $CONDA_SH_REMOTE && conda activate dexcontrol && dexsensor launch --robot $ROBOT_NAME --sensor base_back_camera --sensor base_front_camera --sensor lidar_3d_front --sensor lidar_3d_back\""
-    HEAD_SENSOR_CMD="ssh -t $VEGA_SSH \"sshpass -p '$NANO_PWD' ssh -t $NANO_SSH_OPTS $NANO_SSH 'dexsensor launch --robot $ROBOT_NAME --sensor head_camera'\""
+    # ulimit -n 65535: raise the fd limit so dexsensor's Zenoh transport doesn't exhaust
+    # the 16384 soft limit over long sessions ("received corrupt message"/"Connection
+    # reset by peer" + "Hint: increase the system open file limit"). 65535 is the Jetson's
+    # existing hard cap, so no root needed. See jetson-base-sensor-fd-limit memory.
+    BASE_SENSOR_CMD="ssh -t $VEGA_SSH \"ulimit -n 65535 && source $CONDA_SH_REMOTE && conda activate dexcontrol && dexsensor launch --robot $ROBOT_NAME --sensor base_back_camera --sensor base_front_camera --sensor lidar_3d_front --sensor lidar_3d_back\""
+    HEAD_SENSOR_CMD="ssh -t $VEGA_SSH \"sshpass -p '$NANO_PWD' ssh -t $NANO_SSH_OPTS $NANO_SSH 'ulimit -n 65535; dexsensor launch --robot $ROBOT_NAME --sensor head_camera'\""
     echo "-> Launching sensors on the Jetson and Nano..."
     gnome-terminal --window --title="base_sensors" -- bash -c "$BASE_SENSOR_CMD; exec bash"
     gnome-terminal --window --title="head_camera" -- bash -c "$HEAD_SENSOR_CMD; exec bash"
